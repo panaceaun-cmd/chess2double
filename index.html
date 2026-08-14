@@ -2971,6 +2971,8 @@
     lastMove = room.lastMove;
     if(room.timers) timers = room.timers;
     if(room.capturedFrom){ capturedFrom = room.capturedFrom; renderCapturedPanel(); }
+    if(room.takenOverBy) takenOverBy = room.takenOverBy;
+    pendingFightOn = room.pendingFightOn || null;
     const wasGameOver = gameOver;
     gameOver = room.gameOver;
     selected = null; legalMoves = [];
@@ -2980,6 +2982,8 @@
     announceLastMove();
     if(gameOver && !wasGameOver){
       displayWinnerOnly(room.winnerTeam);
+    } else if(!gameOver && wasGameOver){
+      document.getElementById('overlay').classList.remove('show');
     }
   }
 
@@ -2992,7 +2996,9 @@
       status: gameOver ? 'finished' : 'active',
       board, turnIndex, enPassant, lastMove, gameOver, timers, capturedFrom,
       moveSeq: onlineMoveSeq,
-      winnerTeam: winnerTeam || null
+      winnerTeam: winnerTeam || null,
+      takenOverBy: takenOverBy,
+      pendingFightOn: pendingFightOn
     };
     await storeSet('room:' + onlineRoomId, JSON.stringify(payload), true);
   }
@@ -3023,8 +3029,16 @@
   function showWinnerOnline(winningSide){
     const msg = modeWinMsg('2p', winningSide);
     document.getElementById('winner-title').textContent = msg;
-    document.getElementById('winner-text').textContent = t('winKingCaptured');
-    document.getElementById('overlay-fighton').style.display = 'none';
+    const fightBtn = document.getElementById('overlay-fighton');
+    const iAmLosingSide = (onlineSide !== winningSide);
+    if(pendingFightOn && iAmLosingSide){
+      document.getElementById('winner-text').textContent = t('winKingCaptured') + ' ' +
+        t('fightOnOffer').replace('{survivor}', colorLabel(pendingFightOn.survivorColor)).replace('{dead}', colorLabel(pendingFightOn.deadColor));
+      fightBtn.style.display = 'inline-block';
+    } else {
+      document.getElementById('winner-text').textContent = t('winKingCaptured');
+      fightBtn.style.display = 'none';
+    }
     renderWinnerIdentity(lastMove ? lastMove.color : null);
     maybeShowOverlayAd();
     document.getElementById('overlay').classList.add('show');
@@ -3038,8 +3052,16 @@
     if(!winnerTeam) return;
     const msg = modeWinMsg('2p', winnerTeam);
     document.getElementById('winner-title').textContent = msg;
-    document.getElementById('winner-text').textContent = t('winKingCaptured');
-    document.getElementById('overlay-fighton').style.display = 'none';
+    const fightBtn = document.getElementById('overlay-fighton');
+    const iAmLosingSide = (onlineSide !== winnerTeam);
+    if(pendingFightOn && iAmLosingSide){
+      document.getElementById('winner-text').textContent = t('winKingCaptured') + ' ' +
+        t('fightOnOffer').replace('{survivor}', colorLabel(pendingFightOn.survivorColor)).replace('{dead}', colorLabel(pendingFightOn.deadColor));
+      fightBtn.style.display = 'inline-block';
+    } else {
+      document.getElementById('winner-text').textContent = t('winKingCaptured');
+      fightBtn.style.display = 'none';
+    }
     renderWinnerIdentity(lastMove ? lastMove.color : null);
     maybeShowOverlayAd();
     document.getElementById('overlay').classList.add('show');
@@ -4035,8 +4057,7 @@
       } else {
         const deadColor = captured.color;
         const deadOwner = OWNER[deadColor];
-        const survivorColor = onlineRoomId ? null :
-          TURN_ORDER.find(c => c!==deadColor && OWNER[c]===deadOwner && hasKingOnBoard(c));
+        const survivorColor = TURN_ORDER.find(c => c!==deadColor && OWNER[c]===deadOwner && hasKingOnBoard(c));
         gameOver = true;
         pendingFightOn = survivorColor ? {deadColor, survivorColor} : null;
         render();
