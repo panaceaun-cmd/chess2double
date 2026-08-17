@@ -3131,7 +3131,13 @@
 
   async function updateStatsAfterWin(winningSide){
     if(!STORAGE_OK || !myNick) return;
-    const iWon = winningSide === onlineSide;
+    let iWon;
+    if(onlineRoomId){
+      iWon = winningSide === onlineSide;
+    } else {
+      // Local/offline game: attribute "your" result to whichever side Seat 1 controls.
+      iWon = TURN_ORDER.some(c => OWNER[c] === winningSide && MODE_PLAYER_NUM[mode][c] === 1);
+    }
     const raw = await storeGet('stats:' + myNick, true);
     let stats = {games:0, wins:0};
     if(raw){ try{ stats = JSON.parse(raw); }catch(e){} }
@@ -4391,6 +4397,7 @@
     overlay.classList.add('show');
     appendChatMessage(t('systemLabel'), msg, true);
     if(document.getElementById('voice-toggle').checked) speak(msg);
+    updateStatsAfterWin(team);
   }
   function resumeFightToEnd(){
     if(!pendingFightOn) return;
