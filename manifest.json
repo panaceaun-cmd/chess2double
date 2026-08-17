@@ -6,7 +6,7 @@
   "id": "./chess-double.html",
   "scope": "./",
   "display": "standalone",
-  "orientation":dscape",
+  "orientation": "landscape",
   "background_color": "#241812",
   "theme_color": "#241812",
   "lang": "ru",
