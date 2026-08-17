@@ -1309,10 +1309,6 @@
           <span id="voice-read-label">🔊 Озвучивать ходы</span>
           <input type="checkbox" id="voice-toggle">
         </div>
-        <div class="settings-row">
-          <span id="mic-input-label">🎙️ Голосовой ввод в чат</span>
-          <button class="btn secondary" id="mic-toggle-btn">Включить</button>
-        </div>
         <div class="settings-row" style="flex-direction:column; align-items:stretch;">
           <div style="display:flex; justify-content:space-between;">
             <span id="ring-volume-label">🔔 Громкость звонка</span>
@@ -1815,12 +1811,9 @@
     updateMicButtons();
   }
   function updateMicButtons(){
-    const b1 = document.getElementById('mic-toggle-btn');
     const b2 = document.getElementById('chat-mic-btn');
-    if(b1) b1.textContent = micActive ? t('micListening') : (micSupported() ? t('micEnableBtn') : t('micUnavailable'));
     if(b2) b2.textContent = micActive ? '🔴' : '🎙️';
   }
-  document.getElementById('mic-toggle-btn').addEventListener('click', toggleMicDictation);
   const ORIENT_KEYS = [
     ['1','orientName1'], ['2','orientName2'], ['3','orientName3'], ['4','orientName4']
   ];
@@ -1988,8 +1981,8 @@
 
   document.getElementById('chat-mic-btn').addEventListener('click', toggleMicDictation);
   if(!micSupported()){
-    document.getElementById('mic-toggle-btn').textContent = t('micUnavailable');
-    document.getElementById('mic-toggle-btn').disabled = true;
+    const cmb = document.getElementById('chat-mic-btn');
+    if(cmb){ cmb.disabled = true; cmb.title = t('micUnavailable'); }
   }
   // ================= END VOICE INPUT =================
 
@@ -2214,7 +2207,6 @@
     setText('settings-toggle-btn', t('settingsTitle'));
     setText('settings-close-btn', t('statsCloseBtn'));
     setText('voice-read-label', t('voiceReadRow'));
-    setText('mic-input-label', t('micInputRow'));
     setText('ring-volume-label', t('ringVolumeLabel'));
     setText('undo-btn', t('undoBtnLabel'));
     document.getElementById('undo-btn').title = t('undoRowLabel');
@@ -3205,6 +3197,7 @@
     if(fileShareRow) fileShareRow.style.display = STORAGE_OK ? 'flex' : 'none';
     startFileShareListener();
     startCallStateListener();
+    startRoomChatListener();
     maybeAskNotificationPermission();
   }
 
@@ -3468,6 +3461,7 @@
     }
     stopVoiceChatInternal();
     stopCallStateListener();
+    stopRoomChatListener();
     hideIncomingCallModal();
     voiceCallState = null;
     const voiceBtn = document.getElementById('voice-chat-btn');
@@ -5048,6 +5042,25 @@
     document.getElementById('overlay').classList.remove('show');
   });
 
+  let roomChatRef = null;
+  function rcPath(){ return 'room-chat/' + onlineRoomId; }
+  function startRoomChatListener(){
+    stopRoomChatListener();
+    if(!onlineRoomId || !fbDb) return;
+    roomChatRef = fbDb.ref(rcPath());
+    roomChatRef.limitToLast(50).on('child_added', (snap) => {
+      const raw = snap.val();
+      if(!raw) return;
+      let msg; try{ msg = JSON.parse(raw); }catch(e){ return; }
+      if(msg.from === onlineSide) return; // that's my own message, already shown when sent
+      appendChatMessage(msg.sender, msg.text);
+      if(document.getElementById('voice-toggle').checked) speak(msg.sender + ': ' + msg.text);
+    });
+  }
+  function stopRoomChatListener(){
+    if(roomChatRef){ try{ roomChatRef.off(); }catch(e){} roomChatRef = null; }
+  }
+
   document.getElementById('chat-form').addEventListener('submit', e=>{
     e.preventDefault();
     const sender = document.getElementById('chat-sender').value;
@@ -5056,6 +5069,9 @@
     if(!text) return;
     appendChatMessage(sender, text);
     if(document.getElementById('voice-toggle').checked) speak(sender + ': ' + text);
+    if(onlineRoomId && fbDb){
+      fbDb.ref(rcPath()).push(JSON.stringify({sender, text, from: onlineSide, ts: Date.now()}));
+    }
     input.value='';
   });
 
