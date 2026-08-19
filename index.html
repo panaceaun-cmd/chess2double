@@ -29,6 +29,16 @@
   static site set custom response headers. Real protection against that
   specific attack would need different hosting (e.g. Cloudflare Pages,
   Netlify) that can send Content-Security-Policy as an actual header.
+  IMPORTANT pitfall (bit us once already): connect-src below lists the
+  Realtime Database host as an EXACT hostname, not a *.firebasedatabase.app
+  wildcard. Firebase's regional database URLs have TWO subdomain labels
+  (e.g. chess2double-default-rtdb.europe-west1.firebasedatabase.app) but a
+  CSP wildcard only ever matches ONE label — so a wildcard here silently
+  blocks every single database connection (breaking stats, friends,
+  matchmaking, chat, and voice signaling all at once) while looking
+  correct at a glance. If this project's Firebase databaseURL ever
+  changes (region migration, project recreation, etc.), this exact
+  hostname MUST be updated to match, in both the https:// and wss:// entries.
 -->
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
@@ -37,7 +47,7 @@
   font-src https://fonts.gstatic.com;
   img-src 'self' data: blob:;
   media-src 'self' blob:;
-  connect-src 'self' https://*.firebaseio.com wss://*.firebaseio.com https://*.firebasedatabase.app wss://*.firebasedatabase.app https://firebaseinstallations.googleapis.com https://content-firebaseappcheck.googleapis.com;
+  connect-src 'self' https://*.firebaseio.com wss://*.firebaseio.com https://chess2double-default-rtdb.europe-west1.firebasedatabase.app wss://chess2double-default-rtdb.europe-west1.firebasedatabase.app https://firebaseinstallations.googleapis.com https://content-firebaseappcheck.googleapis.com;
   frame-src https://www.google.com https://www.recaptcha.net;
   base-uri 'self';
   form-action 'self';
