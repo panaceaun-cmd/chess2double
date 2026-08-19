@@ -4412,6 +4412,7 @@
   let directCallRemoteAudioEl = null;
   let directCallReconnectTimer = null;
   let directCallDisconnectedSince = null;
+  let directCallFbRefs = []; // offer/answer/candidate listeners registered per attempt — must be turned off on cleanup, or a late event on an already-closed connection can throw and re-show an error message nothing ever clears
 
   function startDirectCallListener(){
     stopDirectCallListener();
@@ -4518,6 +4519,8 @@
   function cleanupDirectCall(){
     if(directCallReconnectTimer){ clearTimeout(directCallReconnectTimer); directCallReconnectTimer = null; }
     directCallDisconnectedSince = null;
+    directCallFbRefs.forEach(ref => { try{ ref.off(); }catch(e){} });
+    directCallFbRefs = [];
     if(directCallLocalStream){ directCallLocalStream.getTracks().forEach(tr => tr.stop()); directCallLocalStream = null; }
     if(directCallPeerConnection){ try{ directCallPeerConnection.close(); }catch(e){} directCallPeerConnection = null; }
     if(directCallRemoteAudioEl){ directCallRemoteAudioEl.srcObject = null; }
@@ -4602,19 +4605,24 @@
         await pc.setLocalDescription(offer);
         const payload = await encryptVoiceSignal(callId, JSON.stringify(offer));
         await fbDb.ref(dcPath('offer')).set(payload);
-        fbDb.ref(dcPath('answer')).on('value', async (snap) => {
+        const answerRef = fbDb.ref(dcPath('answer'));
+        answerRef.on('value', async (snap) => {
+          if(pc !== directCallPeerConnection) return; // this attempt was superseded or the call already ended
           const raw = snap.val();
-          if(!raw || !pc || pc.currentRemoteDescription) return;
+          if(!raw || pc.currentRemoteDescription) return;
           try{
             const decrypted = await decryptVoiceSignal(callId, raw);
             await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(decrypted)));
             await flushPendingCandidates();
-          }catch(e){ showDirectCallBar('⚠ answer-apply: ' + e.message); }
+          }catch(e){ if(pc === directCallPeerConnection) showDirectCallBar('⚠ answer-apply: ' + e.message); }
         });
+        directCallFbRefs.push(answerRef);
       } else {
-        fbDb.ref(dcPath('offer')).on('value', async (snap) => {
+        const offerRef = fbDb.ref(dcPath('offer'));
+        offerRef.on('value', async (snap) => {
+          if(pc !== directCallPeerConnection) return;
           const raw = snap.val();
-          if(!raw || !pc || pc.currentRemoteDescription) return;
+          if(!raw || pc.currentRemoteDescription) return;
           try{
             const decrypted = await decryptVoiceSignal(callId, raw);
             await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(decrypted)));
@@ -4624,11 +4632,13 @@
             await pc.setLocalDescription(answer);
             const payload = await encryptVoiceSignal(callId, JSON.stringify(answer));
             await fbDb.ref(dcPath('answer')).set(payload);
-          }catch(e){ showDirectCallBar('⚠ answer-create: ' + e.message); }
+          }catch(e){ if(pc === directCallPeerConnection) showDirectCallBar('⚠ answer-create: ' + e.message); }
         });
+        directCallFbRefs.push(offerRef);
       }
-      fbDb.ref(dcPath('candidates-' + (isCaller ? 'callee' : 'caller'))).on('child_added', async (snap) => {
-        if(!pc) return;
+      const candRef = fbDb.ref(dcPath('candidates-' + (isCaller ? 'callee' : 'caller')));
+      candRef.on('child_added', async (snap) => {
+        if(pc !== directCallPeerConnection) return;
         try{
           const decrypted = await decryptVoiceSignal(callId, snap.val());
           const candidate = new RTCIceCandidate(JSON.parse(decrypted));
@@ -4637,14 +4647,15 @@
           } else {
             pendingCandidates.push(candidate);
           }
-        }catch(e){ showDirectCallBar('⚠ candidate: ' + e.message); }
+        }catch(e){ if(pc === directCallPeerConnection) showDirectCallBar('⚠ candidate: ' + e.message); }
       });
+      directCallFbRefs.push(candRef);
     }catch(e){
       // this is exactly the failure mode that silently broke the in-game
       // call before it was fixed — without this catch, an error anywhere in
       // offer/answer creation or the Firebase write means NOTHING downstream
       // (not even the candidate listener) ever gets registered, silently.
-      showDirectCallBar('⚠ negotiation: ' + e.message);
+      if(pc === directCallPeerConnection) showDirectCallBar('⚠ negotiation: ' + e.message);
     }
   }
   document.getElementById('direct-call-hangup-btn').addEventListener('click', endDirectCall);
