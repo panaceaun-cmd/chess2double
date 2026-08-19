@@ -4187,7 +4187,20 @@
   // — that is a real limitation of a no-cost setup.
   const RTC_CONFIG = { iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' }
+    { urls: 'stun:stun1.l.google.com:19302' },
+    // STUN alone only helps two peers discover each other's public address —
+    // it cannot actually relay media when either player is behind a strict
+    // ("symmetric") NAT, which is common on mobile data and many home/office
+    // routers. In that situation signaling (the call ringing/accepting,
+    // which goes through Firebase) succeeds perfectly while the actual P2P
+    // audio path silently never forms — exactly "call connects, nobody hears
+    // anything". A TURN server relays the media itself as a fallback, which
+    // fixes that specific case. This is the Open Relay Project's free,
+    // public TURN service (well-known open credentials, published for this
+    // exact use) — https://www.metered.ca/tools/openrelay/
+    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
   ]};
   let voiceLocalStream = null, voicePeerConnection = null, voiceRemoteAudioEl = null, voiceActive = false;
   let voiceFbRefs = [];
