@@ -118,20 +118,20 @@
     display:flex; gap:18px; align-items:flex-start; flex-wrap:wrap;
   }
   #right-panels{
-    flex:0 0 350px; max-width:350px;
+    flex:0 0 400px; max-width:400px;
     display:flex; flex-direction:column; gap:14px;
   }
   #right-panels > div{ position:relative; }
   #sidebar{
     width:100%;
-    columns: 350px 3;
+    columns: 400px 3;
     column-gap: 12px;
     order:2;
   }
   #sidebar > div{
     break-inside: avoid;
     display:block;
-    width:350px;
+    width:400px;
     max-width:100%;
     margin:0 auto 12px;
     vertical-align:top;
@@ -950,7 +950,7 @@
   #online-game-bar.show{display:flex;}
   #online-game-bar b{color:var(--brass);}
   #online-game-bar-players{display:flex; flex-direction:column; gap:3px;}
-  #online-game-bar-players .ogb-row{display:flex; align-items:center; gap:6px;}
+  #online-game-bar-players .ogb-row{display:flex; align-items:center; gap:6px; flex-wrap:wrap;}
   #online-game-bar-actions{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:2px;}
   #reinvite-btn{
     display:none; margin:0 auto 10px; padding:7px 16px;
