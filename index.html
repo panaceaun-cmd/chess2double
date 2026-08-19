@@ -1298,6 +1298,7 @@
         <div class="voice-chat-row">
           <button type="button" class="btn secondary" id="voice-chat-btn" style="display:none;">🔇 Говорить с игроками онлайн</button>
           <span id="voice-chat-status"></span>
+          <span id="voice-chat-diag" style="display:block; font-size:10px; color:var(--ink-dim); opacity:.8; margin-top:2px;"></span>
         </div>
         <div class="voice-chat-row" id="ptt-toggle-row" style="display:none; align-items:center; gap:6px; font-size:12.5px;">
           <input type="checkbox" id="ptt-mode-toggle-2">
@@ -4762,8 +4763,10 @@
 
     voicePeerConnection = new RTCPeerConnection(RTC_CONFIG);
     voiceLocalStream.getTracks().forEach(track => voicePeerConnection.addTrack(track, voiceLocalStream));
+    let voiceGotRemoteTrack = false;
 
     voicePeerConnection.ontrack = (event) => {
+      voiceGotRemoteTrack = true;
       if(!voiceRemoteAudioEl){
         voiceRemoteAudioEl = document.createElement('audio');
         voiceRemoteAudioEl.autoplay = true;
@@ -4771,7 +4774,29 @@
       }
       voiceRemoteAudioEl.srcObject = event.streams[0];
       playRemoteAudio(voiceRemoteAudioEl);
+      updateVoiceDiagnostics();
     };
+    // Visible diagnostics: rather than guessing at the next bug blind, this
+    // shows exactly where things actually stand — which of signaling, ICE
+    // negotiation, or media delivery is the one not completing — right next
+    // to the call status text.
+    function updateVoiceDiagnostics(){
+      const el = document.getElementById('voice-chat-status');
+      if(!el || !voicePeerConnection) return;
+      const localTrack = voiceLocalStream && voiceLocalStream.getAudioTracks()[0];
+      const bits = [
+        'ICE:' + voicePeerConnection.iceConnectionState,
+        'sig:' + voicePeerConnection.signalingState,
+        'mic:' + (localTrack ? (localTrack.enabled ? 'on' : 'muted') : 'none'),
+        'remote-track:' + (voiceGotRemoteTrack ? 'yes' : 'no')
+      ];
+      const diag = document.getElementById('voice-chat-diag');
+      if(diag) diag.textContent = bits.join(' · ');
+    }
+    voicePeerConnection.addEventListener('iceconnectionstatechange', updateVoiceDiagnostics);
+    voicePeerConnection.addEventListener('signalingstatechange', updateVoiceDiagnostics);
+    voicePeerConnection.addEventListener('icegatheringstatechange', updateVoiceDiagnostics);
+    updateVoiceDiagnostics();
     voicePeerConnection.onconnectionstatechange = () => {
       if(!voicePeerConnection) return;
       const st = voicePeerConnection.connectionState;
@@ -4891,6 +4916,8 @@
     voiceDisconnectedSince = null;
     const statusEl = document.getElementById('voice-chat-status');
     if(statusEl) statusEl.textContent = '';
+    const diagEl = document.getElementById('voice-chat-diag');
+    if(diagEl) diagEl.textContent = '';
     if(voiceLocalStream){ voiceLocalStream.getTracks().forEach(tr => tr.stop()); voiceLocalStream = null; }
     if(voicePeerConnection){ try{ voicePeerConnection.close(); }catch(e){} voicePeerConnection = null; }
     if(voiceRemoteAudioEl){ voiceRemoteAudioEl.srcObject = null; }
