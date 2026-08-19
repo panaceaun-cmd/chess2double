@@ -4375,7 +4375,14 @@
     activeDirectCall = { callId: pendingDirectCallIncoming.callId, otherNick: pendingDirectCallIncoming.otherNick, isCaller: false };
     updatePttHoldButtonVisibility();
     pendingDirectCallIncoming = null;
-    await fbDb.ref(fbPath('direct-call:' + myNick)).set(JSON.stringify({from: activeDirectCall.otherNick, callId: activeDirectCall.callId, state:'accepted'}));
+    // must go to the CALLER's own listened-to path (direct-call:<callerNick>)
+    // — writing to direct-call:<myNick> instead meant only the accepter's
+    // own listener ever saw "accepted", so the caller stayed stuck showing
+    // "Calling..." forever and never even started their side of the WebRTC
+    // negotiation (they were supposed to be the offerer).
+    await fbDb.ref(fbPath('direct-call:' + activeDirectCall.otherNick)).set(JSON.stringify({from: myNick, callId: activeDirectCall.callId, state:'accepted'}));
+    if(!directCallPeerConnection) establishDirectCallConnection();
+    showDirectCallBar(t('directCallWith') + ' ' + activeDirectCall.otherNick);
   }
   async function declineDirectCall(){
     if(!pendingDirectCallIncoming) return;
