@@ -3524,6 +3524,7 @@
     startUndoRequestListener();
     startTimerRequestListener();
     startRematchListener();
+    startRoomLeftListener();
     startConnectionWatcher();
     maybeAskNotificationPermission();
   }
@@ -3707,6 +3708,32 @@
   }
   function stopRoomStateListener(){
     if(roomStateFbRef){ try{ roomStateFbRef.off(); }catch(e){} roomStateFbRef = null; }
+  }
+
+  // Deliberately clicking "Покинуть игру" is different from a connection
+  // drop — the OTHER player should find out immediately, not after minutes
+  // of "reconnecting" retries, and should land back at "choose an opponent"
+  // on their own without needing to click Leave themselves.
+  let roomLeftFbRef = null;
+  function startRoomLeftListener(){
+    stopRoomLeftListener();
+    if(!onlineRoomId || !fbDb) return;
+    roomLeftFbRef = fbDb.ref('room-left/' + onlineRoomId);
+    roomLeftFbRef.on('value', (snap) => {
+      const raw = snap.val();
+      if(!raw) return;
+      let data; try{ data = JSON.parse(raw); }catch(e){ return; }
+      if(data.nick === myNick) return; // my own leave notice echoing back — ignore
+      const leftNick = data.nick;
+      document.getElementById('online-game-bar').classList.remove('show');
+      appendSystemToast(leftNick + ' ' + t('playerLeftMsg'));
+      setTimeout(() => {
+        if(onlineRoomId) leaveOnlineGame(false);
+      }, 3000);
+    });
+  }
+  function stopRoomLeftListener(){
+    if(roomLeftFbRef){ try{ roomLeftFbRef.off(); }catch(e){} roomLeftFbRef = null; }
   }
 
   function applyRemoteState(room){
@@ -3919,7 +3946,7 @@
       (isTwoPlayer ? (' <button class="btn secondary small" id="add-friend-from-game-btn"' + (alreadyFriend ? ' disabled' : '') + '>' +
       (alreadyFriend ? escapeHtml(t('friendAddedFromGame')) : escapeHtml(t('addFriendFromGameBtn'))) + '</button>') : '') +
       ' <button class="btn secondary small" id="leave-online-btn">' + escapeHtml(t('leaveBtn')) + '</button>';
-    document.getElementById('leave-online-btn').addEventListener('click', leaveOnlineGame);
+    document.getElementById('leave-online-btn').addEventListener('click', () => leaveOnlineGame());
     const addBtn = document.getElementById('add-friend-from-game-btn');
     if(addBtn && !alreadyFriend){
       addBtn.addEventListener('click', async () => {
@@ -3966,7 +3993,11 @@
     if(connectionWatcherRef){ try{ connectionWatcherRef.off(); }catch(e){} connectionWatcherRef = null; }
   }
 
-  function leaveOnlineGame(){
+  function leaveOnlineGame(notifyOther){
+    if(notifyOther !== false && fbDb && onlineRoomId && myNick){
+      try{ fbDb.ref('room-left/' + onlineRoomId).set(JSON.stringify({nick: myNick, ts: Date.now()})); }catch(e){}
+    }
+    stopRoomLeftListener();
     try{ localStorage.removeItem('chess2-last-room'); }catch(e){}
     if(onlinePollTimer) clearInterval(onlinePollTimer);
     if(multiRoomWaitTimer) clearInterval(multiRoomWaitTimer);
