@@ -4201,7 +4201,20 @@
     const keyMaterial = await crypto.subtle.digest('SHA-256', enc.encode('c2d-voice-key-' + roomId));
     return crypto.subtle.importKey('raw', keyMaterial, {name:'AES-GCM'}, false, ['encrypt','decrypt']);
   }
-  function bufToB64(buf){ return btoa(String.fromCharCode(...new Uint8Array(buf))); }
+  function bufToB64(buf){
+    // Spreading a large typed array straight into String.fromCharCode(...)
+    // can hit the engine's max-arguments limit on bigger payloads (varies by
+    // browser/device) — building the string in fixed-size chunks avoids that
+    // ceiling entirely, which matters here since SDP offers/answers can run
+    // to several KB once ICE candidates and codecs are included.
+    const bytes = new Uint8Array(buf);
+    let binary = '';
+    const CHUNK = 8192;
+    for(let i = 0; i < bytes.length; i += CHUNK){
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+    }
+    return btoa(binary);
+  }
   function b64ToBuf(b64){ return Uint8Array.from(atob(b64), c=>c.charCodeAt(0)); }
   async function encryptVoiceSignal(roomId, plaintext){
     const key = await deriveVoiceKey(roomId);
@@ -4419,6 +4432,15 @@
       }
     };
 
+    let pendingCandidates = [];
+    let remoteDescSet = false;
+    async function flushPendingCandidates(){
+      remoteDescSet = true;
+      const queued = pendingCandidates; pendingCandidates = [];
+      for(const c of queued){
+        try{ await pc.addIceCandidate(c); }catch(e){}
+      }
+    }
     if(isCaller){
       await fbDb.ref(dcPath('offer')).remove();
       await fbDb.ref(dcPath('answer')).remove();
@@ -4433,6 +4455,7 @@
         try{
           const decrypted = await decryptVoiceSignal(callId, raw);
           await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(decrypted)));
+          await flushPendingCandidates();
         }catch(e){}
       });
     } else {
@@ -4442,6 +4465,7 @@
         try{
           const decrypted = await decryptVoiceSignal(callId, raw);
           await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(decrypted)));
+          await flushPendingCandidates();
           const answer = await pc.createAnswer();
           answer.sdp = boostOpusBitrate(answer.sdp);
           await pc.setLocalDescription(answer);
@@ -4454,7 +4478,12 @@
       if(!pc) return;
       try{
         const decrypted = await decryptVoiceSignal(callId, snap.val());
-        await pc.addIceCandidate(new RTCIceCandidate(JSON.parse(decrypted)));
+        const candidate = new RTCIceCandidate(JSON.parse(decrypted));
+        if(remoteDescSet){
+          await pc.addIceCandidate(candidate);
+        } else {
+          pendingCandidates.push(candidate);
+        }
       }catch(e){}
     });
   }
@@ -4776,6 +4805,15 @@
     const offerRef = fbDb.ref(vPath('offer'));
     const answerRef = fbDb.ref(vPath('answer'));
     const candRef = fbDb.ref(vPath('candidates-' + otherSide));
+    let pendingCandidates = []; // candidates that arrive before setRemoteDescription finishes
+    let remoteDescSet = false;
+    async function flushPendingCandidates(){
+      remoteDescSet = true;
+      const queued = pendingCandidates; pendingCandidates = [];
+      for(const c of queued){
+        try{ await voicePeerConnection.addIceCandidate(c); }catch(e){}
+      }
+    }
 
     (async () => {
       if(mySide === 'p1'){
@@ -4794,6 +4832,7 @@
           try{
             const decrypted = await decryptVoiceSignal(roomId, raw);
             await voicePeerConnection.setRemoteDescription(new RTCSessionDescription(JSON.parse(decrypted)));
+            await flushPendingCandidates();
           }catch(e){}
         });
         voiceFbRefs.push(answerRef);
@@ -4804,6 +4843,7 @@
           try{
             const decrypted = await decryptVoiceSignal(roomId, raw);
             await voicePeerConnection.setRemoteDescription(new RTCSessionDescription(JSON.parse(decrypted)));
+            await flushPendingCandidates();
             const answer = await voicePeerConnection.createAnswer();
             answer.sdp = boostOpusBitrate(answer.sdp);
             await voicePeerConnection.setLocalDescription(answer);
@@ -4818,7 +4858,12 @@
         if(!voicePeerConnection) return;
         try{
           const decrypted = await decryptVoiceSignal(roomId, snap.val());
-          await voicePeerConnection.addIceCandidate(new RTCIceCandidate(JSON.parse(decrypted)));
+          const candidate = new RTCIceCandidate(JSON.parse(decrypted));
+          if(remoteDescSet){
+            await voicePeerConnection.addIceCandidate(candidate);
+          } else {
+            pendingCandidates.push(candidate);
+          }
         }catch(e){}
       });
       voiceFbRefs.push(candRef);
@@ -4982,6 +5027,15 @@
     };
 
     const amOfferer = onlineSide < otherSeat; // deterministic: lower seat number always offers
+    let pendingCandidates = [];
+    let remoteDescSet = false;
+    async function flushPendingCandidates(){
+      remoteDescSet = true;
+      const queued = pendingCandidates; pendingCandidates = [];
+      for(const c of queued){
+        try{ await pc.addIceCandidate(c); }catch(e){}
+      }
+    }
     (async () => {
       if(amOfferer){
         await fbDb.ref(groupVoicePairPath(otherSeat, 'offer')).remove();
@@ -4998,6 +5052,7 @@
           try{
             const decrypted = await decryptVoiceSignal(roomId, raw);
             await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(decrypted)));
+            await flushPendingCandidates();
           }catch(e){}
         });
         groupVoiceFbRefs[otherSeat].push(answerRef);
@@ -5009,6 +5064,7 @@
           try{
             const decrypted = await decryptVoiceSignal(roomId, raw);
             await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(decrypted)));
+            await flushPendingCandidates();
             const answer = await pc.createAnswer();
             answer.sdp = boostOpusBitrate(answer.sdp);
             await pc.setLocalDescription(answer);
@@ -5023,7 +5079,12 @@
         if(!pc) return;
         try{
           const decrypted = await decryptVoiceSignal(roomId, snap.val());
-          await pc.addIceCandidate(new RTCIceCandidate(JSON.parse(decrypted)));
+          const candidate = new RTCIceCandidate(JSON.parse(decrypted));
+          if(remoteDescSet){
+            await pc.addIceCandidate(candidate);
+          } else {
+            pendingCandidates.push(candidate);
+          }
         }catch(e){}
       });
       groupVoiceFbRefs[otherSeat].push(candRef);
