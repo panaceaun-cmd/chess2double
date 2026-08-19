@@ -3353,8 +3353,58 @@
       // seat, whoever else clicks quick-match can claim it" mechanism used
       // for replacing a departed player — an unfilled seat in a room being
       // formed for the first time isn't functionally different from one
-      // that's open because someone left.
+      // that's open because someone left. Crucially: check FIRST whether
+      // someone else is already waiting for this same mode before creating
+      // a brand new room — otherwise two people who both picked "4 игрока"
+      // and both clicked quick-match would each just spin up their own
+      // separate room forever and never actually find each other.
       if(!(onlineRoomId && onlineMaxPlayers === wantedMax)){
+        let pickedForming = null;
+        await storeTransaction('queue', (raw) => {
+          let queue = [];
+          if(raw){ try{ queue = JSON.parse(raw); }catch(e){} }
+          queue = queue.filter(q => Date.now() - q.ts < 60000);
+          const candidates = queue.filter(q => q.type === 'forming' && q.mode === mode);
+          if(candidates.length > 0){
+            pickedForming = candidates[0];
+            queue = queue.filter(q => q !== pickedForming);
+          }
+          return JSON.stringify(queue);
+        }, true);
+
+        if(pickedForming){
+          const roomRaw = await storeGet('room:' + pickedForming.roomId, true);
+          let room = roomRaw ? (()=>{ try{ return JSON.parse(roomRaw); }catch(e){ return null; } })() : null;
+          if(room){
+            room.players[pickedForming.seat] = myNick;
+            const seatKeys = []; for(let i=1;i<=wantedMax;i++) seatKeys.push('p'+i);
+            const filled = seatKeys.filter(s => room.players[s]).length;
+            room.status = (filled >= wantedMax) ? 'active' : 'waiting';
+            room.moveSeq = (room.moveSeq||0) + 1;
+            await storeSet('room:' + pickedForming.roomId, JSON.stringify(room), true);
+            if(room.status === 'active'){
+              joinOnlineRoom(pickedForming.roomId, pickedForming.seat, room);
+            } else {
+              enterWaitingInRoom(pickedForming.roomId, pickedForming.seat, wantedMax);
+              onlineRoomId = pickedForming.roomId; onlineSide = pickedForming.seat;
+              onlinePlayers = room.players; onlineMaxPlayers = wantedMax;
+              const stillOpen = openSeatsInRoom(onlinePlayers, onlineMaxPlayers);
+              if(stillOpen.length > 0){
+                await storeTransaction('queue', (raw) => {
+                  let queue = [];
+                  if(raw){ try{ queue = JSON.parse(raw); }catch(e){} }
+                  queue = queue.filter(q => Date.now() - q.ts < 60000);
+                  queue.push({type:'forming', mode, roomId: pickedForming.roomId, seat: stillOpen[0], ts: Date.now(), lang: currentLang});
+                  return JSON.stringify(queue);
+                }, true);
+              }
+            }
+            document.getElementById('quick-match-btn').style.display = 'inline-block';
+            document.getElementById('cancel-queue-btn').style.display = 'none';
+            return;
+          }
+        }
+        // nobody else is waiting for this mode yet — start a room myself
         const roomId = uid();
         const room = {
           mode, maxPlayers: wantedMax, players:{p1:myNick}, status:'waiting',
@@ -3370,7 +3420,7 @@
         let queue = [];
         if(raw){ try{ queue = JSON.parse(raw); }catch(e){} }
         queue = queue.filter(q => Date.now() - q.ts < 60000);
-        queue.push({type:'replacement', roomId: onlineRoomId, seat: openSeats[0], ts: Date.now(), lang: currentLang});
+        queue.push({type:'forming', mode, roomId: onlineRoomId, seat: openSeats[0], ts: Date.now(), lang: currentLang});
         return JSON.stringify(queue);
       }, true);
       document.getElementById('quick-match-btn').style.display = 'inline-block';
