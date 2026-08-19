@@ -15,44 +15,21 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!--
-  Content-Security-Policy: restricts which domains scripts, styles, fonts,
-  images and network connections are allowed to come from, so that even if a
-  bug ever let an attacker inject markup somewhere, the browser still refuses
-  to load a script or send data anywhere outside this fixed list. This can't
-  fully lock down the inline game script (its whole codebase lives in one
-  inline script block, and static GitHub Pages hosting has no way to issue a
-  fresh per-visit nonce for it) — but it still blocks loading a REMOTE script
-  from anywhere else, base-tag hijacking, and object/embed-based attacks.
-  Note: clickjacking protection (frame-ancestors) genuinely can't be added
-  this way — that directive is silently ignored by browsers when set via a
-  meta tag rather than a real HTTP header, and GitHub Pages doesn't let a
-  static site set custom response headers. Real protection against that
-  specific attack would need different hosting (e.g. Cloudflare Pages,
-  Netlify) that can send Content-Security-Policy as an actual header.
-  IMPORTANT pitfall (bit us once already): connect-src below lists the
-  Realtime Database host as an EXACT hostname, not a *.firebasedatabase.app
-  wildcard. Firebase's regional database URLs have TWO subdomain labels
-  (e.g. chess2double-default-rtdb.europe-west1.firebasedatabase.app) but a
-  CSP wildcard only ever matches ONE label — so a wildcard here silently
-  blocks every single database connection (breaking stats, friends,
-  matchmaking, chat, and voice signaling all at once) while looking
-  correct at a glance. If this project's Firebase databaseURL ever
-  changes (region migration, project recreation, etc.), this exact
-  hostname MUST be updated to match, in both the https:// and wss:// entries.
+  A Content-Security-Policy used to be here, restricting which domains
+  scripts/styles/connections could load from. It's been removed: CSP
+  wildcards only match ONE subdomain label, Firebase's regional database
+  host has two (chess2double-default-rtdb.europe-west1.firebasedatabase.app),
+  and even after switching to an exact hostname it still ended up blocking
+  real traffic (stats, friends, matchmaking, voice) at least twice. Given
+  this is a static site with no way to test the policy against real traffic
+  before it goes live, the risk of silently breaking the actual game for
+  real players outweighs the security benefit here — keeping the game
+  reachable for everyone matters more than this specific extra layer.
+  The other hardening from that same pass (escaping all chat/nickname/
+  avatar content before it touches innerHTML, validating avatar data is a
+  real image before using it as a src, Referrer-Policy below) stays in
+  place — those don't carry this same "block real Firebase traffic" risk.
 -->
-<meta http-equiv="Content-Security-Policy" content="
-  default-src 'self';
-  script-src 'self' 'unsafe-inline' https://www.gstatic.com https://www.google.com https://www.recaptcha.net;
-  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
-  font-src https://fonts.gstatic.com;
-  img-src 'self' data: blob:;
-  media-src 'self' blob:;
-  connect-src 'self' https://*.firebaseio.com wss://*.firebaseio.com https://chess2double-default-rtdb.europe-west1.firebasedatabase.app wss://chess2double-default-rtdb.europe-west1.firebasedatabase.app https://firebaseinstallations.googleapis.com https://content-firebaseappcheck.googleapis.com;
-  frame-src https://www.google.com https://www.recaptcha.net;
-  base-uri 'self';
-  form-action 'self';
-  object-src 'none';
-">
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <title>CHESS 2 DOUBLE — 8×16</title>
 <link rel="manifest" href="manifest.json">
