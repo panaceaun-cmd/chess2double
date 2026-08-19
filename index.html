@@ -4854,6 +4854,7 @@
     }
 
     (async () => {
+     try{
       if(mySide === 'p1'){
         await fbDb.ref(vPath('offer')).remove();
         await fbDb.ref(vPath('answer')).remove();
@@ -4871,7 +4872,7 @@
             const decrypted = await decryptVoiceSignal(roomId, raw);
             await voicePeerConnection.setRemoteDescription(new RTCSessionDescription(JSON.parse(decrypted)));
             await flushPendingCandidates();
-          }catch(e){}
+          }catch(e){ showVoiceDiagError('answer-apply: ' + e.message); }
         });
         voiceFbRefs.push(answerRef);
       } else {
@@ -4887,7 +4888,7 @@
             await voicePeerConnection.setLocalDescription(answer);
             const answerPayload = await encryptVoiceSignal(roomId, JSON.stringify(answer));
             await fbDb.ref(vPath('answer')).set(answerPayload);
-          }catch(e){}
+          }catch(e){ showVoiceDiagError('answer-create: ' + e.message); }
         });
         voiceFbRefs.push(offerRef);
       }
@@ -4902,10 +4903,22 @@
           } else {
             pendingCandidates.push(candidate);
           }
-        }catch(e){}
+        }catch(e){ showVoiceDiagError('candidate: ' + e.message); }
       });
       voiceFbRefs.push(candRef);
+     }catch(e){
+       // this is exactly the failure mode that previously left a peer stuck
+       // at ICE:new forever with no visible cause — createOffer/createAnswer,
+       // the SDP tweak, setLocalDescription, or the Firebase write can all
+       // throw here, and without this catch nothing downstream (not even the
+       // candidate listener) ever got registered, silently.
+       showVoiceDiagError('negotiation: ' + e.message);
+     }
     })();
+  }
+  function showVoiceDiagError(msg){
+    const diag = document.getElementById('voice-chat-diag');
+    if(diag) diag.textContent = '⚠ ' + msg;
   }
 
   function stopVoiceChatInternal(){
