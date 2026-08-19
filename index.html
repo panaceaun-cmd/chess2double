@@ -3842,7 +3842,7 @@
     stopRoomPresence();
     stopFileShareListener();
     if(fbDb && onlineRoomId && (voiceActive || voiceCallState)){
-      try{ fbDb.ref(vPath('call-state')).set(JSON.stringify({state:'ended', caller:onlineSide})); }catch(e){}
+      try{ fbDb.ref(vCallStatePath()).set(JSON.stringify({state:'ended', caller:onlineSide})); }catch(e){}
     }
     stopVoiceChatInternal();
     if(groupVoiceActive) stopGroupVoice();
@@ -4194,7 +4194,19 @@
   let voiceFbRefs = [];
   let voiceCallStateRef = null, voiceCallState = null, voicePendingCaller = null;
 
-  function vPath(suffix){ return 'voice-signal/' + onlineRoomId + '/' + suffix; }
+  function vPath(suffix){
+    // must match the voice-signal/$roomId/$pairKey/... structure the rules
+    // actually grant permissions for (same shape group voice already uses) —
+    // writing straight to voice-signal/$roomId/offer (no pair-key level)
+    // doesn't match any rule and gets silently rejected as PERMISSION_DENIED
+    const other = onlineSide === 'p1' ? 'p2' : 'p1';
+    return 'voice-signal/' + onlineRoomId + '/' + pairKeyFor(onlineSide, other) + '/' + suffix;
+  }
+  function vCallStatePath(){
+    // call-state sits directly under $roomId in the rules (not nested under
+    // a pair key) — kept separate from vPath() so this one isn't affected
+    return 'voice-signal/' + onlineRoomId + '/call-state';
+  }
 
   // ---- signaling encryption (AES-GCM, key derived from the room id) ----
   async function deriveVoiceKey(roomId){
@@ -4662,7 +4674,7 @@
     stopCallStateListener();
     if(!onlineRoomId || !fbDb) return;
     const roomId = onlineRoomId;
-    voiceCallStateRef = fbDb.ref(vPath('call-state'));
+    voiceCallStateRef = fbDb.ref(vCallStatePath());
     voiceCallStateRef.on('value', async (snap) => {
       const raw = snap.val();
       if(!raw){ handleCallStateChange(null); return; }
@@ -4678,7 +4690,7 @@
   async function setCallState(data){
     if(!fbDb || !onlineRoomId) return;
     const payload = await encryptVoiceSignal(onlineRoomId, JSON.stringify(data));
-    fbDb.ref(vPath('call-state')).set(payload);
+    fbDb.ref(vCallStatePath()).set(payload);
   }
 
   function handleCallStateChange(data){
@@ -4707,7 +4719,7 @@
       updateVoiceChatButton();
       if(data.caller === onlineSide){
         if(statusEl) statusEl.textContent = t('voiceChatDeclined');
-        setTimeout(() => { if(fbDb && onlineRoomId) fbDb.ref(vPath('call-state')).remove(); }, 2500);
+        setTimeout(() => { if(fbDb && onlineRoomId) fbDb.ref(vCallStatePath()).remove(); }, 2500);
       }
     } else if(data.state === 'ended'){
       hideIncomingCallModal();
