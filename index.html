@@ -942,15 +942,16 @@
   @keyframes spin{to{transform:rotate(360deg);}}
 
   #online-game-bar{
-    display:none; align-items:center; justify-content:center; gap:10px; flex-wrap:wrap;
-    font-size:12px; color:var(--ink-dim);
+    display:none; flex-direction:column; gap:6px;
+    font-size:12.5px; color:var(--ink-dim);
     background:rgba(0,0,0,.25); border:1px solid var(--brass-dim);
-    border-radius:999px; padding:6px 14px; margin-bottom:10px;
+    border-radius:10px; padding:10px 14px; margin-bottom:14px;
   }
   #online-game-bar.show{display:flex;}
-  #sidebar > #online-game-bar{ display:none; }
-  #sidebar > #online-game-bar.show{ display:flex; }
   #online-game-bar b{color:var(--brass);}
+  #online-game-bar-players{display:flex; flex-direction:column; gap:3px;}
+  #online-game-bar-players .ogb-row{display:flex; align-items:center; gap:6px;}
+  #online-game-bar-actions{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:2px;}
   #reinvite-btn{
     display:none; margin:0 auto 10px; padding:7px 16px;
     background:rgba(232,195,62,.18); border:1px solid #e8c33e; border-radius:999px;
@@ -1215,6 +1216,10 @@
         <div class="online-header">
           <span id="online-lobby-title">🌐 Онлайн-лобби</span>
         </div>
+
+        <div id="online-game-bar"></div>
+        <button id="reinvite-btn" type="button" style="display:none;">🔄 Пригласить снова</button>
+
         <div class="online-actions">
           <button class="btn" id="quick-match-btn">🎲 Быстрая игра (случайный соперник)</button>
           <button class="btn secondary" id="cancel-queue-btn" style="display:none;">Отменить поиск</button>
@@ -1234,9 +1239,6 @@
           <button type="submit" class="btn">Отправить</button>
         </form>
       </div>
-
-      <div id="online-game-bar"></div>
-      <button id="reinvite-btn" type="button" style="display:none;">🔄 Пригласить снова</button>
 
     </aside>
 
@@ -3938,22 +3940,33 @@
     if(!onlineRoomId){ bar.classList.remove('show'); return; }
     bar.classList.add('show');
     const isTwoPlayer = onlineMaxPlayers <= 2;
-    const friends = isTwoPlayer ? await getFriends() : [];
-    const alreadyFriend = isTwoPlayer && friends.includes(onlineOpponent);
+    const friends = await getFriends();
     const myColors = TURN_ORDER.filter(c => onlineSeatForColor(c) === onlineSide).map(colorLabel).join('/');
-    bar.innerHTML = '<span id="connection-status-dot" title="">🟢</span><span id="opponent-status-indicator"></span> ' +
-      escapeHtml(t('onlineVsPrefix')) + ' <b>' + escapeHtml(onlineOpponent) + '</b> — ' + escapeHtml(t('youArePrefix')) + ' ' + myColors +
-      (isTwoPlayer ? (' <button class="btn secondary small" id="add-friend-from-game-btn"' + (alreadyFriend ? ' disabled' : '') + '>' +
-      (alreadyFriend ? escapeHtml(t('friendAddedFromGame')) : escapeHtml(t('addFriendFromGameBtn'))) + '</button>') : '') +
-      ' <button class="btn secondary small" id="leave-online-btn">' + escapeHtml(t('leaveBtn')) + '</button>';
+
+    const opponentSeats = Object.keys(onlinePlayers).filter(s => s !== onlineSide && onlinePlayers[s]);
+    const rowsHtml = opponentSeats.map((seat, i) => {
+      const nick = onlinePlayers[seat];
+      const colors = TURN_ORDER.filter(c => onlineSeatForColor(c) === seat).map(colorLabel).join('/');
+      const alreadyFriend = friends.includes(nick);
+      const statusDot = i === 0 ? '<span id="connection-status-dot" title="">🟢</span><span id="opponent-status-indicator"></span> ' : '';
+      return '<div class="ogb-row">' + statusDot +
+        escapeHtml(t('onlineVsPrefix')) + ' <b>' + escapeHtml(nick) + '</b> — ' + escapeHtml(colors) +
+        ' <button class="btn secondary small ogb-add-friend" data-nick="' + escapeHtml(nick) + '"' + (alreadyFriend ? ' disabled' : '') + '>' +
+        (alreadyFriend ? escapeHtml(t('friendAddedFromGame')) : escapeHtml(t('addFriendFromGameBtn'))) + '</button></div>';
+    }).join('');
+
+    bar.innerHTML = '<div id="online-game-bar-players">' + rowsHtml + '</div>' +
+      '<div class="ogb-row">' + escapeHtml(t('youArePrefix')) + ' <b>' + escapeHtml(myColors) + '</b></div>' +
+      '<div id="online-game-bar-actions"><button class="btn secondary small" id="leave-online-btn">' + escapeHtml(t('leaveBtn')) + '</button></div>';
+
     document.getElementById('leave-online-btn').addEventListener('click', () => leaveOnlineGame());
-    const addBtn = document.getElementById('add-friend-from-game-btn');
-    if(addBtn && !alreadyFriend){
-      addBtn.addEventListener('click', async () => {
-        await addFriend(onlineOpponent);
+    bar.querySelectorAll('.ogb-add-friend').forEach(btn => {
+      if(btn.disabled) return;
+      btn.addEventListener('click', async () => {
+        await addFriend(btn.dataset.nick);
         updateOnlineBar();
       });
-    }
+    });
   }
 
   // Firebase's own SDK already reconnects the underlying connection
