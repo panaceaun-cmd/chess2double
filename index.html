@@ -3271,11 +3271,23 @@
     return 'p' + MODE_PLAYER_NUM[mode][color];
   }
 
+  function maxPlayersForMode(m){
+    return m === '3p' ? 3 : (m === '4p' || m === 'ffa') ? 4 : 2;
+  }
   async function invitePlayer(targetNick){
+    const wantedMax = maxPlayersForMode(mode);
+    // already sitting in a room that's still being formed (3-4 player game
+    // not full yet) — invite this friend into ITS next open seat instead of
+    // starting an unrelated second room
+    if(onlineRoomId && onlineMaxPlayers > 1){
+      const filled = Object.values(onlinePlayers).filter(Boolean).length;
+      if(filled < onlineMaxPlayers) return inviteReplacementIntoRoom(targetNick);
+    }
     const roomId = uid();
     await storeSet('room:' + roomId, JSON.stringify({
-      mode:'2p', players:{p1:myNick, p2:null}, status:'waiting',
-      board: initBoard(), turnIndex:0, enPassant:null, lastMove:null, gameOver:false, moveSeq:0, winnerTeam:null
+      mode: mode, maxPlayers: wantedMax, players:{p1:myNick}, status: wantedMax > 1 ? 'waiting' : 'active',
+      board: initBoard(), turnIndex:0, enPassant:null, lastMove:null, gameOver:false, moveSeq:0, winnerTeam:null,
+      timers: {w:agreedTimerSec,b:agreedTimerSec,y:agreedTimerSec,g:agreedTimerSec}
     }), true);
     await storeSet('invite:' + targetNick, JSON.stringify({from:myNick, roomId, ts:Date.now()}), true);
     enterWaitingForOpponent(roomId, 'p1', targetNick);
@@ -3296,23 +3308,28 @@
       const roomRaw = await storeGet('room:' + inv.roomId, true);
       if(!roomRaw) return;
       let room; try{ room = JSON.parse(roomRaw); }catch(e){ return; }
-      let mySeat = 'p2';
-      if(inv.rejoin){
-        const maxP = room.maxPlayers || 2;
-        const seatKeys = []; for(let i=1;i<=maxP;i++) seatKeys.push('p'+i);
-        // if this room already has a seat with MY nickname on it, that's a
-        // reconnect — reclaim that exact seat rather than treating it as an
-        // open slot; only fall back to "first empty seat" for someone who
-        // genuinely never had one (the rematch-replacement case)
-        mySeat = seatKeys.find(s => room.players[s] === myNick)
-              || seatKeys.find(s => !room.players[s])
-              || 'p2';
-      }
+      const maxP = room.maxPlayers || 2;
+      const seatKeys = []; for(let i=1;i<=maxP;i++) seatKeys.push('p'+i);
+      // if this room already has a seat with MY nickname on it, that's a
+      // reconnect — reclaim that exact seat rather than treating it as an
+      // open slot; otherwise take the first genuinely open seat, whether
+      // that's because someone declined a rematch or because the room is
+      // still being originally formed for 3-4 players
+      let mySeat = seatKeys.find(s => room.players[s] === myNick)
+                || seatKeys.find(s => !room.players[s])
+                || 'p2';
       room.players[mySeat] = myNick;
-      room.status = 'active';
+      const filled = seatKeys.filter(s => room.players[s]).length;
+      room.status = (filled >= maxP) ? 'active' : 'waiting';
       room.moveSeq = (room.moveSeq||0) + 1;
       await storeSet('room:' + inv.roomId, JSON.stringify(room), true);
-      joinOnlineRoom(inv.roomId, mySeat, room);
+      if(room.status === 'active'){
+        joinOnlineRoom(inv.roomId, mySeat, room);
+      } else {
+        // room still needs more players — sit in it and wait, same as the
+        // creator does, rather than jumping into an unfinished game
+        enterWaitingInRoom(inv.roomId, mySeat, maxP);
+      }
     };
     document.getElementById('invite-decline').onclick = async ()=>{
       document.getElementById('invite-modal').classList.remove('show');
@@ -3330,15 +3347,48 @@
     document.getElementById('cancel-queue-btn').style.display = 'inline-block';
     setOnlineStatus(t('searchingOpponent'));
 
+    const wantedMax = maxPlayersForMode(mode);
+    if(wantedMax > 2){
+      // 3-4 player modes always go through the same "advertise an open
+      // seat, whoever else clicks quick-match can claim it" mechanism used
+      // for replacing a departed player — an unfilled seat in a room being
+      // formed for the first time isn't functionally different from one
+      // that's open because someone left.
+      if(!(onlineRoomId && onlineMaxPlayers === wantedMax)){
+        const roomId = uid();
+        const room = {
+          mode, maxPlayers: wantedMax, players:{p1:myNick}, status:'waiting',
+          board: initBoard(), turnIndex:0, enPassant:null, lastMove:null, gameOver:false, moveSeq:0, winnerTeam:null,
+          timers: {w:agreedTimerSec,b:agreedTimerSec,y:agreedTimerSec,g:agreedTimerSec}
+        };
+        await storeSet('room:' + roomId, JSON.stringify(room), true);
+        joinOnlineRoom(roomId, 'p1', room);
+      }
+      const openSeats = openSeatsInRoom(onlinePlayers, onlineMaxPlayers);
+      if(openSeats.length === 0) return; // already full somehow — nothing to advertise
+      await storeTransaction('queue', (raw) => {
+        let queue = [];
+        if(raw){ try{ queue = JSON.parse(raw); }catch(e){} }
+        queue = queue.filter(q => Date.now() - q.ts < 60000);
+        queue.push({type:'replacement', roomId: onlineRoomId, seat: openSeats[0], ts: Date.now(), lang: currentLang});
+        return JSON.stringify(queue);
+      }, true);
+      document.getElementById('quick-match-btn').style.display = 'inline-block';
+      document.getElementById('cancel-queue-btn').style.display = 'none';
+      return;
+    }
+
     let pickedOpponent = null;
     let pickedReplacement = null;
     await storeTransaction('queue', (raw) => {
       let queue = [];
       if(raw){ try{ queue = JSON.parse(raw); }catch(e){} }
       queue = queue.filter(q => q.nick !== myNick && Date.now() - q.ts < 60000);
-      // a room with an open seat (someone declined a rematch) gets priority
-      // over starting a brand new game, so their existing connection and
-      // voice call get reused instead of anyone having to reconnect
+      // a room with an open seat (someone declined a rematch, or a 3-4
+      // player game still being formed) gets priority over starting a
+      // brand new 1-on-1 game, so an existing connection/voice call gets
+      // reused instead of anyone having to reconnect, and multiplayer
+      // rooms actually get filled
       const replacementCandidates = queue.filter(q => q.type === 'replacement');
       if(replacementCandidates.length > 0){
         pickedReplacement = replacementCandidates[0];
@@ -3366,10 +3416,32 @@
       }
       let room; try{ room = JSON.parse(roomRaw); }catch(e){ return; }
       room.players[pickedReplacement.seat] = myNick;
-      room.status = 'active';
+      const maxP = room.maxPlayers || 2;
+      const seatKeys = []; for(let i=1;i<=maxP;i++) seatKeys.push('p'+i);
+      const filled = seatKeys.filter(s => room.players[s]).length;
+      room.status = (filled >= maxP) ? 'active' : 'waiting';
       room.moveSeq = (room.moveSeq||0) + 1;
       await storeSet('room:' + pickedReplacement.roomId, JSON.stringify(room), true);
-      joinOnlineRoom(pickedReplacement.roomId, pickedReplacement.seat, room);
+      if(room.status === 'active'){
+        joinOnlineRoom(pickedReplacement.roomId, pickedReplacement.seat, room);
+      } else {
+        // I filled one seat but the room still needs more — sit and wait,
+        // then keep advertising whatever seat(s) remain so the next
+        // quick-match click (from me or anyone) can find them too
+        enterWaitingInRoom(pickedReplacement.roomId, pickedReplacement.seat, maxP);
+        onlineRoomId = pickedReplacement.roomId; onlineSide = pickedReplacement.seat;
+        onlinePlayers = room.players; onlineMaxPlayers = maxP;
+        const stillOpen = openSeatsInRoom(onlinePlayers, onlineMaxPlayers);
+        if(stillOpen.length > 0){
+          await storeTransaction('queue', (raw) => {
+            let queue = [];
+            if(raw){ try{ queue = JSON.parse(raw); }catch(e){} }
+            queue = queue.filter(q => Date.now() - q.ts < 60000);
+            queue.push({type:'replacement', roomId: pickedReplacement.roomId, seat: stillOpen[0], ts: Date.now(), lang: currentLang});
+            return JSON.stringify(queue);
+          }, true);
+        }
+      }
     } else if(pickedOpponent){
       const roomId = uid();
       const room = {
@@ -3387,9 +3459,14 @@
     }
   }
 
+  function openSeatsInRoom(playersObj, maxP){
+    const seats = [];
+    for(let i=1;i<=maxP;i++){ const s='p'+i; if(!playersObj[s]) seats.push(s); }
+    return seats;
+  }
   async function quickMatchForReplacement(){
     if(!STORAGE_OK || !myNick || !onlineRoomId) return;
-    const openSeats = Object.keys(onlinePlayers).filter(s => !onlinePlayers[s]);
+    const openSeats = openSeatsInRoom(onlinePlayers, onlineMaxPlayers);
     if(openSeats.length === 0) return;
     const seat = openSeats[0];
     const statusEl = document.getElementById('rematch-status');
@@ -3419,6 +3496,7 @@
 
   async function cancelQueue(){
     clearInterval(queueWaitTimer);
+    clearInterval(onlinePollTimer);
     document.getElementById('waiting-modal').classList.remove('show');
     document.getElementById('quick-match-btn').style.display = 'inline-block';
     document.getElementById('cancel-queue-btn').style.display = 'none';
@@ -3440,7 +3518,28 @@
       const raw = await storeGet('room:' + roomId, true);
       if(!raw) return;
       let room; try{ room = JSON.parse(raw); }catch(e){ return; }
-      if(room.status === 'active' && room.players.p2){
+      if(room.status === 'active'){
+        clearInterval(onlinePollTimer);
+        document.getElementById('waiting-modal').classList.remove('show');
+        joinOnlineRoom(roomId, side, room);
+      }
+    }, 2000);
+  }
+  // Same idea as enterWaitingForOpponent, but from the perspective of
+  // someone who just accepted an invite into a room that still needs MORE
+  // players (3-4 player game being formed) — wait for the rest to fill in
+  // rather than joining a game that isn't ready yet.
+  function enterWaitingInRoom(roomId, side, maxPlayers){
+    onlineRoomId = roomId; onlineSide = side;
+    document.getElementById('waiting-text').textContent = t('waitingPlayersLabel');
+    document.getElementById('waiting-modal').classList.add('show');
+    onlinePollTimer = setInterval(async ()=>{
+      const raw = await storeGet('room:' + roomId, true);
+      if(!raw) return;
+      let room; try{ room = JSON.parse(raw); }catch(e){ return; }
+      const filled = Object.values(room.players || {}).filter(Boolean).length;
+      document.getElementById('waiting-text').textContent = t('waitingPlayersLabel') + ' (' + filled + '/' + maxPlayers + ')';
+      if(room.status === 'active'){
         clearInterval(onlinePollTimer);
         document.getElementById('waiting-modal').classList.remove('show');
         joinOnlineRoom(roomId, side, room);
@@ -5747,7 +5846,7 @@
   }
   async function inviteReplacementIntoRoom(targetNick){
     if(!onlineRoomId || !fbDb) return;
-    const openSeats = Object.keys(onlinePlayers).filter(s => !onlinePlayers[s]);
+    const openSeats = openSeatsInRoom(onlinePlayers, onlineMaxPlayers);
     if(openSeats.length === 0) return;
     await storeSet('invite:' + targetNick, JSON.stringify({from:myNick, roomId:onlineRoomId, rejoin:true, ts:Date.now()}), true);
     const statusEl = document.getElementById('rematch-status');
