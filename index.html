@@ -7645,37 +7645,35 @@
     const rect = panel.getBoundingClientRect();
     const originalId = panel.id;
     // reserve the panel's original spot with a placeholder BEFORE moving it
-    // out of the flow, so nothing else on the page jumps/reflows. Giving the
-    // placeholder the panel's own id (not just a matching pixel width) is
-    // what actually keeps it in sync with every #id{ width/order/flex }
-    // rule elsewhere in the stylesheet — a plain pixel-width div doesn't
-    // track those, which is exactly what made every OTHER panel's size and
-    // pairing visibly shift the instant a drag started.
+    // out of the flow, so nothing else on the page jumps/reflows. This
+    // placeholder is a plain fixed-pixel-size div — an earlier version of
+    // this tried to keep it in sync with the stylesheet by transferring the
+    // panel's own id onto it, but that meant the REAL panel temporarily
+    // lost its id while floating, which silently broke every bit of CSS
+    // that styles a panel's own content by scoping through its id (like
+    // #captured-panel .cap-row{...} for the captured-pieces list) — the
+    // panel's content would render completely unstyled the moment it
+    // started floating. A plain pixel-matched placeholder has none of that
+    // risk, since it never touches the real panel's identity at all.
     if(panel.parentNode && panel.parentNode !== document.body && !panel._dragPlaceholder){
       const placeholder = document.createElement('div');
       placeholder.className = 'drag-placeholder';
-      // height always needs to be captured explicitly — the ID swap below
-      // keeps WIDTH in sync with #id{...} rules, but nothing sizes height
-      // the same way (it's normally just however tall the content makes
-      // it), so an empty placeholder collapses to almost nothing without
-      // this, which is exactly what let every panel below/beside it drift
-      // upward the instant a drag started.
+      placeholder.style.width = rect.width + 'px';
       placeholder.style.height = rect.height + 'px';
-      if(originalId){
-        placeholder.id = originalId;
-        panel.removeAttribute('id');
-        panel._dragOriginalId = originalId;
-      } else {
-        placeholder.style.width = rect.width + 'px';
-      }
       panel.parentNode.insertBefore(placeholder, panel);
       panel._dragPlaceholder = placeholder;
     }
     // the board sizes itself from --sq (the board-size slider); locking its
     // width here would freeze the frame at whatever size it was when first
-    // dragged, so the slider would stop visibly resizing it afterwards
+    // dragged, so the slider would stop visibly resizing it afterwards.
+    // Priority 'important' matters here: the panel keeps its own id while
+    // floating (see above), and several ids have a !important width rule
+    // for the mobile/tablet 2-column layout — a plain (non-important)
+    // inline style can never win against that, so without this the panel
+    // would stay stuck at its old 50%-of-row width while floating, now
+    // computed against the wrong containing block entirely.
     if(originalId !== 'board-wrap'){
-      panel.style.width = Math.round(rect.width) + 'px';
+      panel.style.setProperty('width', Math.round(rect.width) + 'px', 'important');
     }
     // smoothly ease into the floating position instead of snapping there —
     // only for this initial lift-off, not for every subsequent pointermove
