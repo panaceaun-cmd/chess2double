@@ -2802,8 +2802,22 @@
       return;
     }
     document.getElementById('resume-game-modal').classList.add('show');
-    document.getElementById('resume-game-yes').onclick = () => {
+    document.getElementById('resume-game-yes').onclick = async () => {
       document.getElementById('resume-game-modal').classList.remove('show');
+      // hand my colors' control back from any teammate who'd been covering
+      // for me while I was gone, same as accepting a fresh re-invite does
+      const myColors = TURN_ORDER.filter(c => MODE_PLAYER_NUM[room.mode || '2p'][c] === parseInt(saved.seat.slice(1)));
+      let changed = false;
+      if(room.takenOverBy){ myColors.forEach(c => { if(room.takenOverBy[c]){ delete room.takenOverBy[c]; changed = true; } }); }
+      if(room.eliminatedColors){
+        const before = room.eliminatedColors.length;
+        room.eliminatedColors = room.eliminatedColors.filter(c => !myColors.includes(c));
+        if(room.eliminatedColors.length !== before) changed = true;
+      }
+      if(changed){
+        room.moveSeq = (room.moveSeq||0) + 1;
+        try{ await storeSet('room:' + saved.roomId, JSON.stringify(room), true); }catch(e){}
+      }
       joinOnlineRoom(saved.roomId, saved.seat, room);
     };
     document.getElementById('resume-game-no').onclick = () => {
@@ -3319,6 +3333,12 @@
                 || seatKeys.find(s => !room.players[s])
                 || 'p2';
       room.players[mySeat] = myNick;
+      // if a teammate had been playing my pieces while I was gone (or, as a
+      // fallback, they'd been sat out entirely), returning to my own seat
+      // means I take that control straight back
+      const myColors = TURN_ORDER.filter(c => MODE_PLAYER_NUM[room.mode || '2p'][c] === parseInt(mySeat.slice(1)));
+      if(room.takenOverBy){ myColors.forEach(c => { if(room.takenOverBy[c]) delete room.takenOverBy[c]; }); }
+      if(room.eliminatedColors){ room.eliminatedColors = room.eliminatedColors.filter(c => !myColors.includes(c)); }
       const filled = seatKeys.filter(s => room.players[s]).length;
       room.status = (filled >= maxP) ? 'active' : 'waiting';
       room.moveSeq = (room.moveSeq||0) + 1;
