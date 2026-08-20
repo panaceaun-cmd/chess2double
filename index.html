@@ -3921,6 +3921,7 @@
     startTimerRequestListener();
     startRematchListener();
     startRoomLeftListener();
+    startGroupVoiceInviteListener();
     startConnectionWatcher();
     maybeAskNotificationPermission();
   }
@@ -4439,6 +4440,7 @@
       try{ fbDb.ref('room-left/' + onlineRoomId).set(JSON.stringify({nick: myNick, ts: Date.now()})); }catch(e){}
     }
     stopRoomLeftListener();
+    stopGroupVoiceInviteListener();
     try{ localStorage.removeItem('chess2-last-room'); }catch(e){}
     if(onlinePollTimer) clearInterval(onlinePollTimer);
     if(multiRoomWaitTimer) clearInterval(multiRoomWaitTimer);
@@ -5592,11 +5594,18 @@
   document.getElementById('accept-call-btn').addEventListener('click', () => {
     hideIncomingCallModal();
     if(pendingDirectCallIncoming){ acceptDirectCall(); return; }
+    if(pendingGroupVoiceInvite){ pendingGroupVoiceInvite = false; startGroupVoice(); return; }
     setCallState({state:'accepted', caller:voicePendingCaller});
   });
   document.getElementById('decline-call-btn').addEventListener('click', () => {
     hideIncomingCallModal();
     if(pendingDirectCallIncoming){ declineDirectCall(); return; }
+    if(pendingGroupVoiceInvite){
+      // declining just dismisses this one prompt — the join button stays
+      // available so they can connect on their own whenever they want
+      pendingGroupVoiceInvite = false;
+      return;
+    }
     setCallState({state:'declined', caller:voicePendingCaller});
   });
   // ================= GROUP VOICE (3-4 player rooms — mesh of pairwise calls) =================
@@ -5640,9 +5649,39 @@
     groupVoiceActive = true;
     updateGroupVoiceButton();
     updatePttHoldButtonVisibility();
+    hideIncomingCallModal();
     if(statusEl) statusEl.textContent = t('voiceChatConnecting');
     const otherSeats = Object.keys(onlinePlayers).filter(s => s !== onlineSide && onlinePlayers[s]);
     otherSeats.forEach(seat => establishGroupVoicePeer(seat));
+    // let everyone else in the room know voice chat is open, in case they
+    // haven't joined yet — same ring/accept/decline prompt as a 2-player call
+    try{
+      const payload = await encryptVoiceSignal(onlineRoomId, JSON.stringify({from: myNick, ts: Date.now()}));
+      fbDb.ref('voice-signal/' + onlineRoomId + '/group-invite').set(payload);
+    }catch(e){}
+  }
+
+  let groupVoiceInviteRef = null;
+  let lastSeenGroupInviteTs = 0;
+  let pendingGroupVoiceInvite = false;
+  function startGroupVoiceInviteListener(){
+    stopGroupVoiceInviteListener();
+    if(!onlineRoomId || !fbDb || onlineMaxPlayers <= 2) return;
+    groupVoiceInviteRef = fbDb.ref('voice-signal/' + onlineRoomId + '/group-invite');
+    groupVoiceInviteRef.on('value', async (snap) => {
+      const raw = snap.val();
+      if(!raw || groupVoiceActive) return;
+      let data; try{ data = JSON.parse(await decryptVoiceSignal(onlineRoomId, raw)); }catch(e){ return; }
+      if(!data || data.from === myNick) return;
+      if(data.ts <= lastSeenGroupInviteTs) return; // already prompted (or declined) for this exact invite
+      lastSeenGroupInviteTs = data.ts;
+      pendingGroupVoiceInvite = true;
+      showIncomingCallModal(data.from);
+    });
+  }
+  function stopGroupVoiceInviteListener(){
+    if(groupVoiceInviteRef){ try{ groupVoiceInviteRef.off(); }catch(e){} groupVoiceInviteRef = null; }
+    pendingGroupVoiceInvite = false;
   }
 
   function establishGroupVoicePeer(otherSeat){
