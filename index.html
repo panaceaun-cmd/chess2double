@@ -2180,6 +2180,29 @@
     }
     applyingRemoteRoomStyle = false;
   }
+  // Called right when joining a room: a player's own saved color/name/
+  // outline customizations already exist in localStorage from any earlier
+  // session, but until now nothing had ever pushed them into THIS room —
+  // reusing the same apply functions used for manual changes means this
+  // gets the exact same room-state update and debounced push, just
+  // triggered automatically instead of waiting for the player to nudge a
+  // slider again.
+  function mergeMyPersonalStyleIntoRoom(){
+    if(!onlineRoomId) return;
+    ['w','b','y','g'].forEach(colorKey => {
+      let savedColor = null, savedName = null, savedW = null, savedOutlineColor = null;
+      try{
+        savedColor = localStorage.getItem('chess2-color-' + colorKey);
+        savedName = localStorage.getItem('chess2-colorname-' + colorKey);
+        savedW = localStorage.getItem('chess2-outline-w-' + colorKey);
+        savedOutlineColor = localStorage.getItem('chess2-outline-color-' + colorKey);
+      }catch(e){}
+      if(savedColor) applyPieceColor(colorKey, savedColor, false);
+      if(savedName) applyColorName(colorKey, savedName, false);
+      if(savedW !== null) applyOutlineWidth(colorKey, parseFloat(savedW), false);
+      if(savedOutlineColor) applyOutlineColor(colorKey, savedOutlineColor, false);
+    });
+  }
   let styleChangeDebounceTimer = null;
   function pushStyleChangeIfOnline(){
     if(!onlineRoomId || !fbDb || applyingRemoteRoomStyle) return;
@@ -4022,6 +4045,7 @@
     capturedFrom = room.capturedFrom || {w:[],b:[],y:[],g:[]};
     eliminatedColors = new Set(room.eliminatedColors || []);
     applyRoomStyleFields(room);
+    mergeMyPersonalStyleIntoRoom();
     renderCapturedPanel();
     history = [];
     selected = null; legalMoves = [];
