@@ -157,6 +157,11 @@
                three columns stack into one, touch targets grow
      =============================================================== */
   @media (max-width:767px){
+    /* wider side margin on mobile — 12px (the desktop/global value) reads
+       as nearly edge-to-edge on a narrow phone screen; this gives the
+       panels visible breathing room on both sides instead */
+    body{ padding-left:22px; padding-right:22px; }
+
     /* Collapse every wrapper level down to its children so all panels
        become direct flex items of #app-grid — that's what lets a single
        "order" value below sequence them freely, in a completely different
@@ -179,8 +184,9 @@
     #history-panel{ order:9; width:100%; }
   }
   @media (max-width:420px){
-    /* smallest phones: trim outer padding further so nothing crowds */
-    body{ padding:0 6px 32px; }
+    /* smallest phones still get a visible side margin — just a touch
+       tighter than the 22px used above 420px wide */
+    body{ padding:0 16px 32px; }
   }
 
   /* drag-and-drop panels */
