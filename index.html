@@ -1694,6 +1694,12 @@
   // above: restoring a saved custom name at page load runs before the rest
   // of the online state exists.
   let customColorNames = {w:null, b:null, y:null, g:null};
+  // guard for outline width/color room sync — declared this early because
+  // the outline settings init block below runs as an immediately-invoked
+  // function at page load, unconditionally (not gated on "if a saved value
+  // exists" the way piece colors are), so it would hit every single user,
+  // not just ones with a custom outline, if this were declared any later.
+  let applyingRemoteOutline = false;
   // ================= APP CHECK (blocks requests that don't come from this real site) =================
   // 1. Go to https://www.google.com/recaptcha/admin/create , register a
   //    reCAPTCHA v3 site for your domain (panaceaun-cmd.github.io), copy the
@@ -2212,12 +2218,48 @@
     const range = document.getElementById('piece-outline-width-' + colorKey);
     if(range && parseFloat(range.value) !== px) range.value = px;
     if(save){ try{ localStorage.setItem('chess2-outline-w-' + colorKey, String(px)); }catch(e){} }
+    syncOutlineStyleToRoom(colorKey);
   }
   function applyOutlineColor(colorKey, hex, save){
     document.documentElement.style.setProperty('--piece-stroke-color-' + CSSCOLOR[colorKey], hex);
     const input = document.getElementById('piece-outline-color-' + colorKey);
     if(input) input.value = hex;
     if(save){ try{ localStorage.setItem('chess2-outline-color-' + colorKey, hex); }catch(e){} }
+    syncOutlineStyleToRoom(colorKey);
+  }
+  function syncOutlineStyleToRoom(colorKey){
+    if(!onlineRoomId || !fbDb || applyingRemoteOutline) return;
+    const width = document.getElementById('piece-outline-width-' + colorKey);
+    const color = document.getElementById('piece-outline-color-' + colorKey);
+    if(!width || !color) return;
+    storeTransaction('room-outline-style:' + onlineRoomId, (raw) => {
+      let styles = {};
+      if(raw){ try{ styles = JSON.parse(raw); }catch(e){} }
+      styles[colorKey] = {w: width.value, c: color.value};
+      return JSON.stringify(styles);
+    }, true);
+  }
+  let roomOutlineStyleRef = null;
+  function startRoomOutlineListener(){
+    stopRoomOutlineListener();
+    if(!onlineRoomId || !fbDb) return;
+    roomOutlineStyleRef = fbDb.ref('room-outline-style/' + onlineRoomId);
+    roomOutlineStyleRef.on('value', (snap) => {
+      const raw = snap.val();
+      if(!raw) return;
+      let styles; try{ styles = JSON.parse(raw); }catch(e){ return; }
+      applyingRemoteOutline = true;
+      OUTLINE_COLOR_KEYS.forEach(([colorKey]) => {
+        const s = styles[colorKey];
+        if(!s) return;
+        if(s.w !== undefined) applyOutlineWidth(colorKey, parseFloat(s.w), false);
+        if(s.c) applyOutlineColor(colorKey, s.c, false);
+      });
+      applyingRemoteOutline = false;
+    });
+  }
+  function stopRoomOutlineListener(){
+    if(roomOutlineStyleRef){ try{ roomOutlineStyleRef.off(); }catch(e){} roomOutlineStyleRef = null; }
   }
   (function initOutlineControls(){
     OUTLINE_COLOR_KEYS.forEach(([colorKey])=>{
@@ -4051,6 +4093,7 @@
     startGroupVoiceInviteListener();
     startRoomPieceColorsListener();
     startRoomColorNamesListener();
+    startRoomOutlineListener();
     startConnectionWatcher();
     maybeAskNotificationPermission();
   }
@@ -4631,6 +4674,7 @@
     stopGroupVoiceInviteListener();
     stopRoomPieceColorsListener();
     stopRoomColorNamesListener();
+    stopRoomOutlineListener();
     // restore my own personal color choices, in case a roommate's shared
     // colors are currently showing on screen from the game just left
     ['w','b','y','g'].forEach(colorKey => {
@@ -4645,6 +4689,13 @@
       customColorNames[colorKey] = savedName || null;
       const nameInput = document.getElementById('pc-name-' + colorKey);
       if(nameInput) nameInput.value = colorLabel(colorKey);
+      let savedW = null, savedOutlineColor = null;
+      try{
+        savedW = localStorage.getItem('chess2-outline-w-' + colorKey);
+        savedOutlineColor = localStorage.getItem('chess2-outline-color-' + colorKey);
+      }catch(e){}
+      applyOutlineWidth(colorKey, savedW !== null ? parseFloat(savedW) : .6, false);
+      applyOutlineColor(colorKey, savedOutlineColor || '#000000', false);
     });
     try{ localStorage.removeItem('chess2-last-room'); }catch(e){}
     if(onlinePollTimer) clearInterval(onlinePollTimer);
