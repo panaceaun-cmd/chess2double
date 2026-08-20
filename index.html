@@ -1701,6 +1701,17 @@
   // exists" the way piece colors are), so it would hit every single user,
   // not just ones with a custom outline, if this were declared any later.
   let applyingRemoteOutline = false;
+  // Shared piece color / name / outline style now travels as part of the
+  // room object itself (same mechanism as board/players/timers — the one
+  // that's actually proven to work reliably) instead of three separate
+  // Firebase paths with their own listeners, after that approach didn't
+  // visibly sync for real users despite looking correct in review. These
+  // hold the latest known merged state so any push (a move, a swap, or a
+  // style change) always carries everyone's contributions forward, not
+  // just whoever is pushing right now.
+  let roomPieceColors = {}, roomColorNames = {}, roomOutlineStyle = {};
+  let applyingRemoteRoomStyle = false;
+  let lastStoreTransactionError = null;
   // ================= APP CHECK (blocks requests that don't come from this real site) =================
   // 1. Go to https://www.google.com/recaptcha/admin/create , register a
   //    reCAPTCHA v3 site for your domain (panaceaun-cmd.github.io), copy the
@@ -2103,84 +2114,82 @@
     render();
   });
 
-  // ---- custom piece colors ----
-  let applyingRemotePieceColor = false;
+  // ---- custom piece colors, names, and outline style — all synced together
+  // as part of the room state itself (see pushRoomState / applyRemoteState),
+  // the same mechanism that's actually proven reliable for board/players/
+  // timers, instead of maintaining separate sync paths for each ----
   function applyPieceColor(colorKey, hex, save){
     document.documentElement.style.setProperty('--accent-' + CSSCOLOR[colorKey], hex);
     const input = document.getElementById('piece-color-' + colorKey);
     if(input) input.value = hex;
     if(save){ try{ localStorage.setItem('chess2-color-' + colorKey, hex); }catch(e){} }
-    // while in an online game, a color change is shared so every player
-    // sees the same piece colors, not just the person who picked them —
-    // guarded so applying an incoming remote change never re-broadcasts it
-    if(onlineRoomId && fbDb && !applyingRemotePieceColor){
-      storeTransaction('room-piece-colors:' + onlineRoomId, (raw) => {
-        let colors = {};
-        if(raw){ try{ colors = JSON.parse(raw); }catch(e){} }
-        colors[colorKey] = hex;
-        return JSON.stringify(colors);
-      }, true).then(ok => showColorSyncResult(ok));
-    }
+    roomPieceColors[colorKey] = hex;
+    pushStyleChangeIfOnline();
   }
-  let roomPieceColorsRef = null;
-  function startRoomPieceColorsListener(){
-    stopRoomPieceColorsListener();
-    if(!onlineRoomId || !fbDb) return;
-    roomPieceColorsRef = fbDb.ref('room-piece-colors/' + onlineRoomId);
-    roomPieceColorsRef.on('value', (snap) => {
-      const raw = snap.val();
-      if(!raw) return;
-      let colors; try{ colors = JSON.parse(raw); }catch(e){ return; }
-      applyingRemotePieceColor = true;
-      ['w','b','y','g'].forEach(colorKey => {
-        if(colors[colorKey]) applyPieceColor(colorKey, colors[colorKey], false);
-      });
-      applyingRemotePieceColor = false;
-    });
-  }
-  function stopRoomPieceColorsListener(){
-    if(roomPieceColorsRef){ try{ roomPieceColorsRef.off(); }catch(e){} roomPieceColorsRef = null; }
-  }
-
-  // ---- custom color names (e.g. renaming "Серые" to a name of your choice) ----
-  // colorLabel() above already reads customColorNames first, so once that's
-  // set, every one of its ~50 call sites throughout the app (status text,
-  // chat, labels, win messages...) picks up the new name automatically —
-  // nothing else needs to change.
-  let applyingRemoteColorName = false;
   function applyColorName(colorKey, name, save){
     customColorNames[colorKey] = name ? name.slice(0,20) : null;
     const el = document.getElementById('pc-name-' + colorKey);
     if(el) el.value = colorLabel(colorKey);
     if(save){ try{ localStorage.setItem('chess2-colorname-' + colorKey, customColorNames[colorKey] || ''); }catch(e){} }
     applyLang(); // refreshes every other on-screen occurrence of this color's name
-    if(onlineRoomId && fbDb && !applyingRemoteColorName){
-      storeTransaction('room-color-names:' + onlineRoomId, (raw) => {
-        let names = {};
-        if(raw){ try{ names = JSON.parse(raw); }catch(e){} }
-        names[colorKey] = customColorNames[colorKey];
-        return JSON.stringify(names);
-      }, true).then(ok => showColorSyncResult(ok));
+    roomColorNames[colorKey] = customColorNames[colorKey];
+    pushStyleChangeIfOnline();
+  }
+  function applyOutlineWidth(colorKey, px, save){
+    document.documentElement.style.setProperty('--piece-stroke-w-' + CSSCOLOR[colorKey], px + 'px');
+    const label = document.getElementById('ol-value-' + colorKey);
+    if(label) label.textContent = px + 'px';
+    const range = document.getElementById('piece-outline-width-' + colorKey);
+    if(range && parseFloat(range.value) !== px) range.value = px;
+    if(save){ try{ localStorage.setItem('chess2-outline-w-' + colorKey, String(px)); }catch(e){} }
+    if(!roomOutlineStyle[colorKey]) roomOutlineStyle[colorKey] = {};
+    roomOutlineStyle[colorKey].w = px;
+    pushStyleChangeIfOnline();
+  }
+  function applyOutlineColor(colorKey, hex, save){
+    document.documentElement.style.setProperty('--piece-stroke-color-' + CSSCOLOR[colorKey], hex);
+    const input = document.getElementById('piece-outline-color-' + colorKey);
+    if(input) input.value = hex;
+    if(save){ try{ localStorage.setItem('chess2-outline-color-' + colorKey, hex); }catch(e){} }
+    if(!roomOutlineStyle[colorKey]) roomOutlineStyle[colorKey] = {};
+    roomOutlineStyle[colorKey].c = hex;
+    pushStyleChangeIfOnline();
+  }
+  // Applies the room's currently-known shared style (called on join, and
+  // whenever a room-state update arrives) — visually, and into the same
+  // local holders a subsequent LOCAL change would build on top of, so nobody
+  // ever pushes a style update that accidentally forgets someone else's.
+  function applyRoomStyleFields(room){
+    applyingRemoteRoomStyle = true;
+    if(room.pieceColors){
+      roomPieceColors = room.pieceColors;
+      ['w','b','y','g'].forEach(k => { if(roomPieceColors[k]) applyPieceColor(k, roomPieceColors[k], false); });
     }
-  }
-  let roomColorNamesRef = null;
-  function startRoomColorNamesListener(){
-    stopRoomColorNamesListener();
-    if(!onlineRoomId || !fbDb) return;
-    roomColorNamesRef = fbDb.ref('room-color-names/' + onlineRoomId);
-    roomColorNamesRef.on('value', (snap) => {
-      const raw = snap.val();
-      if(!raw) return;
-      let names; try{ names = JSON.parse(raw); }catch(e){ return; }
-      applyingRemoteColorName = true;
-      ['w','b','y','g'].forEach(colorKey => {
-        if(colorKey in names) applyColorName(colorKey, names[colorKey], false);
+    if(room.colorNames){
+      roomColorNames = room.colorNames;
+      ['w','b','y','g'].forEach(k => { if(k in roomColorNames) applyColorName(k, roomColorNames[k], false); });
+    }
+    if(room.outlineStyle){
+      roomOutlineStyle = room.outlineStyle;
+      ['w','b','y','g'].forEach(k => {
+        const s = roomOutlineStyle[k];
+        if(!s) return;
+        if(s.w !== undefined) applyOutlineWidth(k, parseFloat(s.w), false);
+        if(s.c) applyOutlineColor(k, s.c, false);
       });
-      applyingRemoteColorName = false;
-    });
+    }
+    applyingRemoteRoomStyle = false;
   }
-  function stopRoomColorNamesListener(){
-    if(roomColorNamesRef){ try{ roomColorNamesRef.off(); }catch(e){} roomColorNamesRef = null; }
+  let styleChangeDebounceTimer = null;
+  function pushStyleChangeIfOnline(){
+    if(!onlineRoomId || !fbDb || applyingRemoteRoomStyle) return;
+    // a color-picker "input" event fires continuously while dragging — wait
+    // for it to settle for a moment instead of pushing a full room state on
+    // every intermediate value
+    clearTimeout(styleChangeDebounceTimer);
+    styleChangeDebounceTimer = setTimeout(() => {
+      pushRoomState(null).then(ok => showColorSyncResult(ok));
+    }, 250);
   }
   ['w','b','y','g'].forEach(colorKey=>{
     let saved = null;
@@ -2212,56 +2221,6 @@
 
   // ---- piece outline (contour) thickness + color — per team color ----
   const OUTLINE_COLOR_KEYS = [['w','white'], ['b','black'], ['y','yellow'], ['g','grey']];
-  function applyOutlineWidth(colorKey, px, save){
-    document.documentElement.style.setProperty('--piece-stroke-w-' + CSSCOLOR[colorKey], px + 'px');
-    const label = document.getElementById('ol-value-' + colorKey);
-    if(label) label.textContent = px + 'px';
-    const range = document.getElementById('piece-outline-width-' + colorKey);
-    if(range && parseFloat(range.value) !== px) range.value = px;
-    if(save){ try{ localStorage.setItem('chess2-outline-w-' + colorKey, String(px)); }catch(e){} }
-    syncOutlineStyleToRoom(colorKey);
-  }
-  function applyOutlineColor(colorKey, hex, save){
-    document.documentElement.style.setProperty('--piece-stroke-color-' + CSSCOLOR[colorKey], hex);
-    const input = document.getElementById('piece-outline-color-' + colorKey);
-    if(input) input.value = hex;
-    if(save){ try{ localStorage.setItem('chess2-outline-color-' + colorKey, hex); }catch(e){} }
-    syncOutlineStyleToRoom(colorKey);
-  }
-  function syncOutlineStyleToRoom(colorKey){
-    if(!onlineRoomId || !fbDb || applyingRemoteOutline) return;
-    const width = document.getElementById('piece-outline-width-' + colorKey);
-    const color = document.getElementById('piece-outline-color-' + colorKey);
-    if(!width || !color) return;
-    storeTransaction('room-outline-style:' + onlineRoomId, (raw) => {
-      let styles = {};
-      if(raw){ try{ styles = JSON.parse(raw); }catch(e){} }
-      styles[colorKey] = {w: width.value, c: color.value};
-      return JSON.stringify(styles);
-    }, true).then(ok => showColorSyncResult(ok));
-  }
-  let roomOutlineStyleRef = null;
-  function startRoomOutlineListener(){
-    stopRoomOutlineListener();
-    if(!onlineRoomId || !fbDb) return;
-    roomOutlineStyleRef = fbDb.ref('room-outline-style/' + onlineRoomId);
-    roomOutlineStyleRef.on('value', (snap) => {
-      const raw = snap.val();
-      if(!raw) return;
-      let styles; try{ styles = JSON.parse(raw); }catch(e){ return; }
-      applyingRemoteOutline = true;
-      OUTLINE_COLOR_KEYS.forEach(([colorKey]) => {
-        const s = styles[colorKey];
-        if(!s) return;
-        if(s.w !== undefined) applyOutlineWidth(colorKey, parseFloat(s.w), false);
-        if(s.c) applyOutlineColor(colorKey, s.c, false);
-      });
-      applyingRemoteOutline = false;
-    });
-  }
-  function stopRoomOutlineListener(){
-    if(roomOutlineStyleRef){ try{ roomOutlineStyleRef.off(); }catch(e){} roomOutlineStyleRef = null; }
-  }
   (function initOutlineControls(){
     OUTLINE_COLOR_KEYS.forEach(([colorKey])=>{
       let savedW = null, savedColor = null;
@@ -2922,7 +2881,10 @@
       return ok;
     }
     if(!STORAGE_OK) return false;
-    try{ await fbDb.ref(fbPath(key)).set(value); return true; }catch(e){ return false; }
+    try{ await fbDb.ref(fbPath(key)).set(value); return true; }catch(e){
+      lastStoreTransactionError = (e && e.message) || String(e);
+      return false;
+    }
   }
   async function storeList(prefix, shared){
     if(!STORAGE_OK) return [];
@@ -2945,7 +2907,6 @@
   // Atomic read-modify-write for the matchmaking queue specifically, so two
   // players clicking "quick match" at the same instant can't both read the
   // same stale queue and silently overwrite each other's update.
-  let lastStoreTransactionError = null;
   function showColorSyncResult(ok){
     const el = document.getElementById('color-sync-status');
     if(!el) return;
@@ -4060,6 +4021,7 @@
     timers = room.timers || {w:agreedTimerSec,b:agreedTimerSec,y:agreedTimerSec,g:agreedTimerSec};
     capturedFrom = room.capturedFrom || {w:[],b:[],y:[],g:[]};
     eliminatedColors = new Set(room.eliminatedColors || []);
+    applyRoomStyleFields(room);
     renderCapturedPanel();
     history = [];
     selected = null; legalMoves = [];
@@ -4109,9 +4071,6 @@
     startRematchListener();
     startRoomLeftListener();
     startGroupVoiceInviteListener();
-    startRoomPieceColorsListener();
-    startRoomColorNamesListener();
-    startRoomOutlineListener();
     startConnectionWatcher();
     maybeAskNotificationPermission();
   }
@@ -4367,6 +4326,7 @@
     if(room.capturedFrom){ capturedFrom = room.capturedFrom; renderCapturedPanel(); }
     if(room.takenOverBy) takenOverBy = room.takenOverBy;
     if(room.eliminatedColors) eliminatedColors = new Set(room.eliminatedColors);
+    applyRoomStyleFields(room);
     if(room.players){
       const wasIncomplete = Object.values(onlinePlayers).some(v => !v) || Object.keys(onlinePlayers).length < (room.maxPlayers||2);
       onlinePlayers = room.players;
@@ -4403,7 +4363,7 @@
   }
 
   async function pushRoomState(winnerTeam){
-    if(!onlineRoomId) return;
+    if(!onlineRoomId) return false;
     onlineMoveSeq += 1;
     const payload = {
       mode: mode,
@@ -4415,9 +4375,12 @@
       moveSeq: onlineMoveSeq,
       winnerTeam: winnerTeam || null,
       takenOverBy: takenOverBy,
-      pendingFightOn: pendingFightOn
+      pendingFightOn: pendingFightOn,
+      pieceColors: roomPieceColors,
+      colorNames: roomColorNames,
+      outlineStyle: roomOutlineStyle
     };
-    await storeSet('room:' + onlineRoomId, JSON.stringify(payload), true);
+    return await storeSet('room:' + onlineRoomId, JSON.stringify(payload), true);
   }
 
   async function renderWinnerIdentity(winningColor){
@@ -4690,9 +4653,7 @@
     }
     stopRoomLeftListener();
     stopGroupVoiceInviteListener();
-    stopRoomPieceColorsListener();
-    stopRoomColorNamesListener();
-    stopRoomOutlineListener();
+    roomPieceColors = {}; roomColorNames = {}; roomOutlineStyle = {};
     // restore my own personal color choices, in case a roommate's shared
     // colors are currently showing on screen from the game just left
     ['w','b','y','g'].forEach(colorKey => {
