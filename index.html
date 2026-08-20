@@ -4594,6 +4594,23 @@
     room.players[otherSeat] = tmp;
     room.moveSeq = (room.moveSeq||0) + 1;
     await storeSet('room:' + onlineRoomId, JSON.stringify(room), true);
+    // this was the actual bug: without updating onlineMoveSeq to match what
+    // was just written, this player's own NEXT move would recompute the
+    // exact same moveSeq the swap just used — and every other client's
+    // "only apply if moveSeq is strictly newer" check would then silently
+    // drop that move as a stale duplicate, since it never increased.
+    onlineMoveSeq = room.moveSeq;
+    // also adopt whatever board/turn state was actually current in this
+    // same read, so the swap can never locally revert a move that landed
+    // in Firebase moments before it
+    board = room.board;
+    turnIndex = room.turnIndex;
+    turn = TURN_ORDER[turnIndex];
+    enPassant = room.enPassant;
+    lastMove = room.lastMove;
+    if(room.timers) timers = room.timers;
+    if(room.takenOverBy) takenOverBy = room.takenOverBy;
+    if(room.eliminatedColors) eliminatedColors = new Set(room.eliminatedColors);
     const otherNick = room.players[mySeat]; // after the swap above, this now holds who I swapped with
     const announceMsg = myNick + ' ' + t('swappedColorsWithMsg') + ' ' + otherNick;
     appendChatMessage(t('systemLabel'), announceMsg, true);
