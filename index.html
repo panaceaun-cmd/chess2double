@@ -832,6 +832,18 @@
     padding:8px 14px; color:var(--ink); font-size:12.5px; box-shadow:0 4px 14px rgba(0,0,0,.5);
   }
   #direct-call-bar.show{display:flex;}
+  #waiting-banner{
+    display:none; position:fixed; top:64px; left:50%; transform:translateX(-50%);
+    z-index:69; align-items:center; gap:10px; flex-wrap:wrap; max-width:90vw;
+    background:rgba(15,9,6,.95); border:1px solid var(--brass); border-radius:10px;
+    padding:8px 14px; color:var(--ink); font-size:12.5px; box-shadow:0 4px 14px rgba(0,0,0,.5);
+  }
+  #waiting-banner.show{display:flex;}
+  .spinner-sm{
+    display:inline-block; width:14px; height:14px; border-radius:50%;
+    border:2px solid rgba(201,162,75,.3); border-top-color:var(--brass);
+    animation:spin .8s linear infinite; flex-shrink:0;
+  }
   #incoming-call-modal{
     position:fixed; inset:0; background:rgba(10,6,3,.78);
     display:none; align-items:center; justify-content:center; z-index:70; padding:20px;
@@ -1599,13 +1611,11 @@
     </div>
   </div>
 
-  <div id="waiting-modal" class="modal-overlay">
-    <div class="card">
-      <div class="spinner"></div>
-      <h2 id="waiting-title">Ожидание соперника…</h2>
-      <p id="waiting-text">Ищем игрока для матча.</p>
-      <button class="btn secondary" id="waiting-cancel">Отменить</button>
-    </div>
+  <div id="waiting-banner">
+    <span class="spinner-sm"></span>
+    <span id="waiting-title">Ожидание соперника…</span>
+    <span id="waiting-text">Ищем игрока для матча.</span>
+    <button class="btn secondary small" id="waiting-cancel">Отменить</button>
   </div>
 
   <div id="lang-gate-modal" class="modal-overlay">
@@ -3708,7 +3718,7 @@
       joinOnlineRoom(roomId, 'p2', room);
     } else {
       document.getElementById('waiting-text').textContent = t('searchingOpponent');
-      document.getElementById('waiting-modal').classList.add('show');
+      document.getElementById('waiting-banner').classList.add('show');
       queueWaitTimer = setInterval(pollMatchAssigned, 2500);
     }
   }
@@ -3741,7 +3751,7 @@
     let data; try{ data = JSON.parse(raw); }catch(e){ return; }
     await storeDelete('match-assigned:' + myNick, true);
     clearInterval(queueWaitTimer);
-    document.getElementById('waiting-modal').classList.remove('show');
+    document.getElementById('waiting-banner').classList.remove('show');
     const roomRaw = await storeGet('room:' + data.roomId, true);
     if(!roomRaw) return;
     let room; try{ room = JSON.parse(roomRaw); }catch(e){ return; }
@@ -3751,7 +3761,7 @@
   async function cancelQueue(){
     clearInterval(queueWaitTimer);
     clearInterval(onlinePollTimer);
-    document.getElementById('waiting-modal').classList.remove('show');
+    document.getElementById('waiting-banner').classList.remove('show');
     document.getElementById('quick-match-btn').style.display = 'inline-block';
     document.getElementById('cancel-queue-btn').style.display = 'none';
     setOnlineStatus('');
@@ -3781,14 +3791,14 @@
   function enterWaitingForOpponent(roomId, side, targetNick){
     onlineRoomId = roomId; onlineSide = side; onlineWaitingOnly = true;
     document.getElementById('waiting-text').textContent = t('waitingForAccept') + ' ' + targetNick + ' ' + t('waitingAcceptSuffix');
-    document.getElementById('waiting-modal').classList.add('show');
+    document.getElementById('waiting-banner').classList.add('show');
     onlinePollTimer = setInterval(async ()=>{
       const raw = await storeGet('room:' + roomId, true);
       if(!raw) return;
       let room; try{ room = JSON.parse(raw); }catch(e){ return; }
       if(room.status === 'active'){
         clearInterval(onlinePollTimer);
-        document.getElementById('waiting-modal').classList.remove('show');
+        document.getElementById('waiting-banner').classList.remove('show');
         joinOnlineRoom(roomId, side, room);
       }
     }, 2000);
@@ -3800,7 +3810,7 @@
   function enterWaitingInRoom(roomId, side, maxPlayers){
     onlineRoomId = roomId; onlineSide = side; onlineWaitingOnly = true;
     document.getElementById('waiting-text').textContent = t('waitingPlayersLabel');
-    document.getElementById('waiting-modal').classList.add('show');
+    document.getElementById('waiting-banner').classList.add('show');
     onlinePollTimer = setInterval(async ()=>{
       const raw = await storeGet('room:' + roomId, true);
       if(!raw) return;
@@ -3809,7 +3819,7 @@
       document.getElementById('waiting-text').textContent = t('waitingPlayersLabel') + ' (' + filled + '/' + maxPlayers + ')';
       if(room.status === 'active'){
         clearInterval(onlinePollTimer);
-        document.getElementById('waiting-modal').classList.remove('show');
+        document.getElementById('waiting-banner').classList.remove('show');
         joinOnlineRoom(roomId, side, room);
       }
     }, 2000);
@@ -3818,7 +3828,7 @@
   function joinOnlineRoom(roomId, side, room){
     clearInterval(queueWaitTimer);
     onlineWaitingOnly = false;
-    document.getElementById('waiting-modal').classList.remove('show');
+    document.getElementById('waiting-banner').classList.remove('show');
     document.getElementById('quick-match-btn').style.display = 'inline-block';
     document.getElementById('cancel-queue-btn').style.display = 'none';
     onlineRoomId = roomId;
