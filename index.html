@@ -2071,11 +2071,42 @@
   });
 
   // ---- custom piece colors ----
+  let applyingRemotePieceColor = false;
   function applyPieceColor(colorKey, hex, save){
     document.documentElement.style.setProperty('--accent-' + CSSCOLOR[colorKey], hex);
     const input = document.getElementById('piece-color-' + colorKey);
     if(input) input.value = hex;
     if(save){ try{ localStorage.setItem('chess2-color-' + colorKey, hex); }catch(e){} }
+    // while in an online game, a color change is shared so every player
+    // sees the same piece colors, not just the person who picked them —
+    // guarded so applying an incoming remote change never re-broadcasts it
+    if(onlineRoomId && fbDb && !applyingRemotePieceColor){
+      storeTransaction('room-piece-colors:' + onlineRoomId, (raw) => {
+        let colors = {};
+        if(raw){ try{ colors = JSON.parse(raw); }catch(e){} }
+        colors[colorKey] = hex;
+        return JSON.stringify(colors);
+      }, true);
+    }
+  }
+  let roomPieceColorsRef = null;
+  function startRoomPieceColorsListener(){
+    stopRoomPieceColorsListener();
+    if(!onlineRoomId || !fbDb) return;
+    roomPieceColorsRef = fbDb.ref('room-piece-colors/' + onlineRoomId);
+    roomPieceColorsRef.on('value', (snap) => {
+      const raw = snap.val();
+      if(!raw) return;
+      let colors; try{ colors = JSON.parse(raw); }catch(e){ return; }
+      applyingRemotePieceColor = true;
+      ['w','b','y','g'].forEach(colorKey => {
+        if(colors[colorKey]) applyPieceColor(colorKey, colors[colorKey], false);
+      });
+      applyingRemotePieceColor = false;
+    });
+  }
+  function stopRoomPieceColorsListener(){
+    if(roomPieceColorsRef){ try{ roomPieceColorsRef.off(); }catch(e){} roomPieceColorsRef = null; }
   }
   ['w','b','y','g'].forEach(colorKey=>{
     let saved = null;
@@ -3937,6 +3968,7 @@
     startRematchListener();
     startRoomLeftListener();
     startGroupVoiceInviteListener();
+    startRoomPieceColorsListener();
     startConnectionWatcher();
     maybeAskNotificationPermission();
   }
@@ -4498,6 +4530,17 @@
     }
     stopRoomLeftListener();
     stopGroupVoiceInviteListener();
+    stopRoomPieceColorsListener();
+    // restore my own personal color choices, in case a roommate's shared
+    // colors are currently showing on screen from the game just left
+    ['w','b','y','g'].forEach(colorKey => {
+      let saved = null;
+      try{ saved = localStorage.getItem('chess2-color-' + colorKey); }catch(e){}
+      if(saved){ document.documentElement.style.setProperty('--accent-' + CSSCOLOR[colorKey], saved); }
+      else { document.documentElement.style.removeProperty('--accent-' + CSSCOLOR[colorKey]); }
+      const input = document.getElementById('piece-color-' + colorKey);
+      if(input) input.value = saved || DEFAULT_ACCENT[colorKey];
+    });
     try{ localStorage.removeItem('chess2-last-room'); }catch(e){}
     if(onlinePollTimer) clearInterval(onlinePollTimer);
     if(multiRoomWaitTimer) clearInterval(multiRoomWaitTimer);
