@@ -156,32 +156,34 @@
      Phone   : ≤ 767px — board and side panels stack vertically, the
                three columns stack into one, touch targets grow
      =============================================================== */
-  @media (max-width:767px){
-    /* wider side margin on mobile — 12px (the desktop/global value) reads
-       as nearly edge-to-edge on a narrow phone screen; this gives the
-       panels visible breathing room on both sides instead */
+  @media (max-width:1023px){
+    /* wider side margin than the desktop/global 12px — reads as nearly
+       edge-to-edge on a narrow screen otherwise */
     body{ padding-left:22px; padding-right:22px; }
 
     /* Collapse every wrapper level down to its children so all panels
-       become direct flex items of #app-grid — that's what lets a single
-       "order" value below sequence them freely, in a completely different
-       order than the desktop's 3-column grouping, without duplicating any
-       HTML for a separate mobile layout. */
+       become direct flex items of #app-grid, then lay them out as a
+       left/right pair of columns: switching to a wrapping ROW flow and
+       giving each panel ~50% width means every two consecutive items
+       (by "order") land side by side, while the board stays full-width
+       on its own row above them. This covers phones and tablets alike —
+       one layout for the whole non-desktop range, as opposed to the
+       desktop's separate 3-column grouping. */
     #top-row{ display:contents; }
     #sidebar{ display:contents; }
     #right-panels{ display:contents; }
     .sidebar-col{ display:contents; }
-    #app-grid{ gap:12px; }
+    #app-grid{ flex-direction:row; flex-wrap:wrap; gap:12px; }
 
     #main-col{ order:1; flex:none; width:100%; }
-    #controls{ order:2; width:100%; }
-    #chat-panel{ order:3; width:100%; }
-    #timers-panel{ order:4; width:100%; }
-    #local-players-panel{ order:5; width:100%; }
-    #online-panel{ order:6; width:100%; }
-    #captured-panel{ order:7; width:100%; }
-    #record-panel{ order:8; width:100%; }
-    #history-panel{ order:9; width:100%; }
+    #controls{ order:2; flex:none; width:calc(50% - 6px); }
+    #online-panel{ order:3; flex:none; width:calc(50% - 6px); }
+    #chat-panel{ order:4; flex:none; width:calc(50% - 6px); }
+    #captured-panel{ order:5; flex:none; width:calc(50% - 6px); }
+    #timers-panel{ order:6; flex:none; width:calc(50% - 6px); }
+    #record-panel{ order:7; flex:none; width:calc(50% - 6px); }
+    #local-players-panel{ order:8; flex:none; width:calc(50% - 6px); }
+    #history-panel{ order:9; flex:none; width:calc(50% - 6px); }
   }
   @media (max-width:420px){
     /* smallest phones still get a visible side margin — just a touch
