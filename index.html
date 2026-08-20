@@ -1812,6 +1812,21 @@
       ? {w:'w', b:'b', y:'y', g:'g'}
       : {w:'p1', y:'p1', b:'p2', g:'p2'};
   }
+  // Board geometry is fixed regardless of mode: white/yellow always start on
+  // the near ranks (row 7), black/grey always on the far ranks (row 0) — see
+  // initBoard. OWNER above gets reassigned per mode for win-condition
+  // purposes (ffa treats each color as its own team), so it can't be reused
+  // here; this mapping never changes.
+  const COLOR_HOME_SIDE = {w:'bottom', y:'bottom', b:'top', g:'top'};
+  function shouldFlipForOnlineViewer(){
+    if(!onlineRoomId) return false;
+    // looked up fresh every call (never cached) against the CURRENT mode and
+    // seat assignment, so this stays correct even if which color a seat
+    // controls ever changes mid-game
+    const myColor = TURN_ORDER.find(c => onlineSeatForColor(c) === onlineSide);
+    if(!myColor) return false;
+    return COLOR_HOME_SIDE[myColor] === 'top';
+  }
   function modePlayerLabel(m, col){ return playerLabel(MODE_PLAYER_NUM[m][col]); }
   function modeMetaTitle(m){ return t('mode' + m + 'Title'); }
   function modeMetaDesc(m){ return t('mode' + m + 'Desc'); }
@@ -6595,7 +6610,11 @@
     const boardEl = document.getElementById('board');
     boardEl.innerHTML='';
     boardEl.dataset.theme = boardTheme;
-    const flipBoard = (orientationMode===4 && OWNER[turn]==='p2');
+    // Online: each player always sees their own pieces on the near ranks,
+    // regardless of which of the 4 colors they currently control — this
+    // overrides the local orientationMode setting, which only makes sense
+    // for offline hotseat play where everyone shares one screen.
+    const flipBoard = onlineRoomId ? shouldFlipForOnlineViewer() : (orientationMode===4 && OWNER[turn]==='p2');
     boardEl.classList.toggle('flip180', flipBoard);
     const FILES = 'ABCDEFGHIJKLMNOP';
 
@@ -6638,7 +6657,8 @@
         const piece = board[r][c];
         if(piece){
           let rotate;
-          if(orientationMode===1) rotate=false;
+          if(onlineRoomId) rotate=flipBoard;
+          else if(orientationMode===1) rotate=false;
           else if(orientationMode===2) rotate=true;
           else if(orientationMode===3) rotate=(piece.color==='b'||piece.color==='g');
           else rotate=flipBoard;
