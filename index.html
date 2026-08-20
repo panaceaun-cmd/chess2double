@@ -2642,6 +2642,11 @@
   const STORAGE_OK = (fbDb !== null);
   let myNick = null;
   let onlineRoomId = null, onlineSide = null, onlineOpponent = null, onlineMoveSeq = 0;
+  // true while sitting in enterWaitingForOpponent/enterWaitingInRoom (a room
+  // that isn't full/active yet) — distinct from onlineRoomId itself, since
+  // that gets set during this waiting phase too, and other logic (like
+  // still being reachable by a direct invite) needs to tell the two apart
+  let onlineWaitingOnly = false;
   let onlinePlayers = {}; // seat ('p1'..'p4') -> nickname, for every online mode
   let onlineMaxPlayers = 2;
   let multiRoomWaitTimer = null;
@@ -3308,7 +3313,7 @@
   }
 
   async function pollMyInvite(){
-    if(!STORAGE_OK || !myNick || onlineRoomId) return;
+    if(!STORAGE_OK || !myNick || (onlineRoomId && !onlineWaitingOnly)) return;
     if(document.getElementById('invite-modal').classList.contains('show')) return;
     const raw = await storeGet('invite:' + myNick, true);
     if(!raw) return;
@@ -3319,6 +3324,23 @@
     document.getElementById('invite-accept').onclick = async ()=>{
       document.getElementById('invite-modal').classList.remove('show');
       await storeDelete('invite:' + myNick, true);
+      // if I was still just waiting for players in some OTHER room (not
+      // this one) when this invite arrived, don't leave a ghost seat
+      // behind there — free it up for someone else to actually fill
+      if(onlineWaitingOnly && onlineRoomId && onlineRoomId !== inv.roomId){
+        try{
+          const oldRaw = await storeGet('room:' + onlineRoomId, true);
+          if(oldRaw){
+            let oldRoom = JSON.parse(oldRaw);
+            if(oldRoom.players[onlineSide] === myNick){
+              delete oldRoom.players[onlineSide];
+              oldRoom.moveSeq = (oldRoom.moveSeq||0) + 1;
+              await storeSet('room:' + onlineRoomId, JSON.stringify(oldRoom), true);
+            }
+          }
+        }catch(e){}
+        clearInterval(onlinePollTimer);
+      }
       const roomRaw = await storeGet('room:' + inv.roomId, true);
       if(!roomRaw) return;
       let room; try{ room = JSON.parse(roomRaw); }catch(e){ return; }
@@ -3577,11 +3599,25 @@
         if(raw){ try{ queue = JSON.parse(raw).filter(q=>q.nick!==myNick); }catch(e){} }
         return JSON.stringify(queue);
       }, true);
+      if(onlineWaitingOnly && onlineRoomId){
+        try{
+          const raw = await storeGet('room:' + onlineRoomId, true);
+          if(raw){
+            let room = JSON.parse(raw);
+            if(room.players[onlineSide] === myNick){
+              delete room.players[onlineSide];
+              room.moveSeq = (room.moveSeq||0) + 1;
+              await storeSet('room:' + onlineRoomId, JSON.stringify(room), true);
+            }
+          }
+        }catch(e){}
+      }
     }
+    onlineRoomId = null; onlineSide = null; onlineWaitingOnly = false;
   }
 
   function enterWaitingForOpponent(roomId, side, targetNick){
-    onlineRoomId = roomId; onlineSide = side;
+    onlineRoomId = roomId; onlineSide = side; onlineWaitingOnly = true;
     document.getElementById('waiting-text').textContent = t('waitingForAccept') + ' ' + targetNick + ' ' + t('waitingAcceptSuffix');
     document.getElementById('waiting-modal').classList.add('show');
     onlinePollTimer = setInterval(async ()=>{
@@ -3600,7 +3636,7 @@
   // players (3-4 player game being formed) — wait for the rest to fill in
   // rather than joining a game that isn't ready yet.
   function enterWaitingInRoom(roomId, side, maxPlayers){
-    onlineRoomId = roomId; onlineSide = side;
+    onlineRoomId = roomId; onlineSide = side; onlineWaitingOnly = true;
     document.getElementById('waiting-text').textContent = t('waitingPlayersLabel');
     document.getElementById('waiting-modal').classList.add('show');
     onlinePollTimer = setInterval(async ()=>{
@@ -3619,6 +3655,7 @@
 
   function joinOnlineRoom(roomId, side, room){
     clearInterval(queueWaitTimer);
+    onlineWaitingOnly = false;
     document.getElementById('waiting-modal').classList.remove('show');
     document.getElementById('quick-match-btn').style.display = 'inline-block';
     document.getElementById('cancel-queue-btn').style.display = 'none';
@@ -4209,7 +4246,7 @@
     if(voiceBtn) voiceBtn.style.display = 'none';
     const fileShareRow = document.getElementById('file-share-row');
     if(fileShareRow) fileShareRow.style.display = 'none';
-    onlineRoomId = null; onlineSide = null; onlineOpponent = null;
+    onlineRoomId = null; onlineSide = null; onlineOpponent = null; onlineWaitingOnly = false;
     onlinePlayers = {}; onlineMaxPlayers = 2; seatReconnectingSince = {};
     document.getElementById('mode-select').style.opacity = '';
     document.getElementById('mode-select').style.pointerEvents = '';
