@@ -255,6 +255,14 @@
   .outline-color-row-top .outline-value{ flex:1; text-align:right; font-size:11px; color:var(--ink-dim); }
   .outline-width-range{ width:100%; }
   .color-picker-row span{font-size:12px; color:var(--ink-dim);}
+  .color-picker-row .pc-name-input{
+    flex:1; background:transparent; border:1px solid transparent; border-radius:6px;
+    color:var(--ink-dim); font-size:12px; font-family:'Inter',sans-serif; padding:4px 6px;
+    min-width:0;
+  }
+  .color-picker-row .pc-name-input:hover, .color-picker-row .pc-name-input:focus{
+    border-color:var(--brass-dim); background:rgba(0,0,0,.2); outline:none; color:var(--ink);
+  }
   .color-picker-row input[type=color]{
     width:34px; height:26px; border:1px solid var(--brass-dim); border-radius:6px;
     background:transparent; cursor:pointer; padding:0;
@@ -1463,10 +1471,10 @@
         <div class="settings-row">
           <span id="piece-colors-label">🎨 Цвет фигур</span>
         </div>
-        <div class="color-picker-row"><span id="pc-label-w">Белые</span><input type="color" id="piece-color-w" value="#fbf6ec"></div>
-        <div class="color-picker-row"><span id="pc-label-b">Чёрные</span><input type="color" id="piece-color-b" value="#1b1310"></div>
-        <div class="color-picker-row"><span id="pc-label-y">Жёлтые</span><input type="color" id="piece-color-y" value="#e8c33e"></div>
-        <div class="color-picker-row"><span id="pc-label-g">Серые</span><input type="color" id="piece-color-g" value="#9a9691"></div>
+        <div class="color-picker-row"><input type="text" class="pc-name-input" id="pc-name-w" data-color="w" maxlength="20" value="Белые"><input type="color" id="piece-color-w" value="#fbf6ec"></div>
+        <div class="color-picker-row"><input type="text" class="pc-name-input" id="pc-name-b" data-color="b" maxlength="20" value="Чёрные"><input type="color" id="piece-color-b" value="#1b1310"></div>
+        <div class="color-picker-row"><input type="text" class="pc-name-input" id="pc-name-y" data-color="y" maxlength="20" value="Жёлтые"><input type="color" id="piece-color-y" value="#e8c33e"></div>
+        <div class="color-picker-row"><input type="text" class="pc-name-input" id="pc-name-g" data-color="g" maxlength="20" value="Серые"><input type="color" id="piece-color-g" value="#9a9691"></div>
         <button class="btn secondary" id="piece-colors-reset">↺ Цвета по умолчанию</button>
 
         <div class="settings-row">
@@ -1674,6 +1682,18 @@
     appId: "1:578262803570:web:d3274c84da0b7968678eeb"
   };
   let fbDb = null;
+  // declared this early (rather than down with the rest of the online/lobby
+  // state) because some page-load-time code — like restoring a saved custom
+  // piece color — runs synchronously before the game reaches its normal
+  // online-state setup, and referencing this before its declaration would
+  // throw and halt the entire script for anyone with a saved color, which is
+  // exactly the bug this fixes.
+  let onlineRoomId = null, onlineSide = null, onlineOpponent = null, onlineMoveSeq = 0;
+  // custom per-color display names (e.g. renaming "Серые" to something a
+  // player picks) — declared this early for the same reason as onlineRoomId
+  // above: restoring a saved custom name at page load runs before the rest
+  // of the online state exists.
+  let customColorNames = {w:null, b:null, y:null, g:null};
   // ================= APP CHECK (blocks requests that don't come from this real site) =================
   // 1. Go to https://www.google.com/recaptcha/admin/create , register a
   //    reCAPTCHA v3 site for your domain (panaceaun-cmd.github.io), copy the
@@ -1719,6 +1739,12 @@
     g:{K:'♚',Q:'♛',R:'♜',B:'♝',N:'♞',P:'♟'}
   };
   const CSSCOLOR = {w:'white', y:'yellow', b:'black', g:'grey'};
+  // moved this early (rather than down near colorLabel) for the same reason
+  // as onlineRoomId/customColorNames above — colorLabel() runs synchronously
+  // at page-load time when restoring a saved custom color name, and needs
+  // this available before that point.
+  const COLOR_IDX = {w:0, b:1, y:2, g:3};
+  const PIECE_IDX = {K:0, Q:1, R:2, B:3, N:4, P:5};
   function squareName(r,c){
     const file = 'ABCDEFGHIJKLMNOP'[c];
     const rank = ROWS - r;
@@ -2108,6 +2134,58 @@
   function stopRoomPieceColorsListener(){
     if(roomPieceColorsRef){ try{ roomPieceColorsRef.off(); }catch(e){} roomPieceColorsRef = null; }
   }
+
+  // ---- custom color names (e.g. renaming "Серые" to a name of your choice) ----
+  // colorLabel() above already reads customColorNames first, so once that's
+  // set, every one of its ~50 call sites throughout the app (status text,
+  // chat, labels, win messages...) picks up the new name automatically —
+  // nothing else needs to change.
+  let applyingRemoteColorName = false;
+  function applyColorName(colorKey, name, save){
+    customColorNames[colorKey] = name ? name.slice(0,20) : null;
+    const el = document.getElementById('pc-name-' + colorKey);
+    if(el) el.value = colorLabel(colorKey);
+    if(save){ try{ localStorage.setItem('chess2-colorname-' + colorKey, customColorNames[colorKey] || ''); }catch(e){} }
+    applyLang(); // refreshes every other on-screen occurrence of this color's name
+    if(onlineRoomId && fbDb && !applyingRemoteColorName){
+      storeTransaction('room-color-names:' + onlineRoomId, (raw) => {
+        let names = {};
+        if(raw){ try{ names = JSON.parse(raw); }catch(e){} }
+        names[colorKey] = customColorNames[colorKey];
+        return JSON.stringify(names);
+      }, true);
+    }
+  }
+  let roomColorNamesRef = null;
+  function startRoomColorNamesListener(){
+    stopRoomColorNamesListener();
+    if(!onlineRoomId || !fbDb) return;
+    roomColorNamesRef = fbDb.ref('room-color-names/' + onlineRoomId);
+    roomColorNamesRef.on('value', (snap) => {
+      const raw = snap.val();
+      if(!raw) return;
+      let names; try{ names = JSON.parse(raw); }catch(e){ return; }
+      applyingRemoteColorName = true;
+      ['w','b','y','g'].forEach(colorKey => {
+        if(colorKey in names) applyColorName(colorKey, names[colorKey], false);
+      });
+      applyingRemoteColorName = false;
+    });
+  }
+  function stopRoomColorNamesListener(){
+    if(roomColorNamesRef){ try{ roomColorNamesRef.off(); }catch(e){} roomColorNamesRef = null; }
+  }
+  ['w','b','y','g'].forEach(colorKey=>{
+    let saved = null;
+    try{ saved = localStorage.getItem('chess2-colorname-' + colorKey); }catch(e){}
+    if(saved) customColorNames[colorKey] = saved;
+    const nameInput = document.getElementById('pc-name-' + colorKey);
+    nameInput.value = colorLabel(colorKey);
+    nameInput.addEventListener('change', e=>{
+      applyColorName(colorKey, e.target.value.trim(), true);
+    });
+  });
+
   ['w','b','y','g'].forEach(colorKey=>{
     let saved = null;
     try{ saved = localStorage.getItem('chess2-color-' + colorKey); }catch(e){}
@@ -2121,6 +2199,7 @@
       document.documentElement.style.removeProperty('--accent-' + CSSCOLOR[colorKey]);
       document.getElementById('piece-color-' + colorKey).value = DEFAULT_ACCENT[colorKey];
       try{ localStorage.removeItem('chess2-color-' + colorKey); }catch(e){}
+      applyColorName(colorKey, null, true);
     });
   });
 
@@ -2333,9 +2412,8 @@
     if(LOC.ru[key] !== undefined) return LOC.ru[key];
     return key;
   }
-  const COLOR_IDX = {w:0, b:1, y:2, g:3};
-  const PIECE_IDX = {K:0, Q:1, R:2, B:3, N:4, P:5};
   function colorLabel(c){
+    if(customColorNames[c]) return customColorNames[c];
     const cur = LOC[currentLang] || LOC.ru;
     return (cur.colors && cur.colors[COLOR_IDX[c]]) || LOC.ru.colors[COLOR_IDX[c]];
   }
@@ -2353,6 +2431,10 @@
     sel.value = currentLang;
   }
 
+  function setColorNameInput(id, colorKey){
+    const el = document.getElementById(id);
+    if(el) el.value = colorLabel(colorKey);
+  }
   function setText(id, text){ const el = document.getElementById(id); if(el) el.textContent = text; }
   function setPlaceholder(id, text){ const el = document.getElementById(id); if(el) el.placeholder = text; }
 
@@ -2446,10 +2528,10 @@
     setText('piece-colors-label', t('pieceColorsLabel'));
     setText('piece-outline-label', t('pieceOutlineLabel'));
     setText('piece-colors-reset', t('pieceColorsResetBtn'));
-    setText('pc-label-w', colorLabel('w'));
-    setText('pc-label-b', colorLabel('b'));
-    setText('pc-label-y', colorLabel('y'));
-    setText('pc-label-g', colorLabel('g'));
+    setColorNameInput('pc-name-w', 'w');
+    setColorNameInput('pc-name-b', 'b');
+    setColorNameInput('pc-name-y', 'y');
+    setColorNameInput('pc-name-g', 'g');
     setText('ol-label-w', colorLabel('w'));
     setText('ol-label-b', colorLabel('b'));
     setText('ol-label-y', colorLabel('y'));
@@ -2720,7 +2802,6 @@
   // ================= ONLINE / LOBBY =================
   const STORAGE_OK = (fbDb !== null);
   let myNick = null;
-  let onlineRoomId = null, onlineSide = null, onlineOpponent = null, onlineMoveSeq = 0;
   // true while sitting in enterWaitingForOpponent/enterWaitingInRoom (a room
   // that isn't full/active yet) — distinct from onlineRoomId itself, since
   // that gets set during this waiting phase too, and other logic (like
@@ -3969,6 +4050,7 @@
     startRoomLeftListener();
     startGroupVoiceInviteListener();
     startRoomPieceColorsListener();
+    startRoomColorNamesListener();
     startConnectionWatcher();
     maybeAskNotificationPermission();
   }
@@ -4531,6 +4613,7 @@
     stopRoomLeftListener();
     stopGroupVoiceInviteListener();
     stopRoomPieceColorsListener();
+    stopRoomColorNamesListener();
     // restore my own personal color choices, in case a roommate's shared
     // colors are currently showing on screen from the game just left
     ['w','b','y','g'].forEach(colorKey => {
@@ -4540,6 +4623,11 @@
       else { document.documentElement.style.removeProperty('--accent-' + CSSCOLOR[colorKey]); }
       const input = document.getElementById('piece-color-' + colorKey);
       if(input) input.value = saved || DEFAULT_ACCENT[colorKey];
+      let savedName = null;
+      try{ savedName = localStorage.getItem('chess2-colorname-' + colorKey); }catch(e){}
+      customColorNames[colorKey] = savedName || null;
+      const nameInput = document.getElementById('pc-name-' + colorKey);
+      if(nameInput) nameInput.value = colorLabel(colorKey);
     });
     try{ localStorage.removeItem('chess2-last-room'); }catch(e){}
     if(onlinePollTimer) clearInterval(onlinePollTimer);
