@@ -124,17 +124,22 @@
   #right-panels > div{ position:relative; }
   #sidebar{
     width:100%;
-    columns: 400px 3;
-    column-gap: 12px;
+    display:flex;
+    flex-wrap:wrap;
+    gap:12px;
+    align-items:flex-start;
     order:2;
   }
-  #sidebar > div{
-    break-inside: avoid;
+  .sidebar-col{
+    flex:0 0 400px;
+    max-width:400px;
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+  }
+  .sidebar-col > div{
     display:block;
-    width:400px;
-    max-width:100%;
-    margin:0 auto 12px;
-    vertical-align:top;
+    width:100%;
     position:relative;
   }
   #main-col{
@@ -143,16 +148,17 @@
   }
 
   /* ===================== RESPONSIVE TIERS =====================
-     Desktop : ≥ 1024px — default styles below (board + right column
-               side by side, sidebar in up to 3 masonry columns)
-     Tablet  : 600–1023px — sidebar narrows to 2 columns automatically
-               (CSS columns does this on its own, no override needed);
-               top-row wraps on its own via flex-wrap if it gets tight
-     Phone   : ≤ 767px — board and side panels stack vertically,
-               sidebar collapses to one column, touch targets grow
+     Desktop : ≥ 1024px — board + online-lobby side by side on top,
+               three fixed columns below (players/recording,
+               controls+captured+history, chat+timer)
+     Tablet  : 600–1023px — the three columns wrap onto more than one
+               row automatically (flex-wrap), no override needed
+     Phone   : ≤ 767px — board and side panels stack vertically, the
+               three columns stack into one, touch targets grow
      =============================================================== */
   @media (max-width:767px){
-    #sidebar{ columns:1; }
+    #sidebar{ flex-direction:column; }
+    .sidebar-col{ max-width:100%; width:100%; }
     #top-row{ flex-direction:column; }
     #right-panels{ flex:none; max-width:100%; width:100%; }
     #app-grid{ gap:12px; }
@@ -1186,6 +1192,7 @@
 
   <div id="app-grid">
     <aside id="sidebar">
+      <div class="sidebar-col" id="sidebar-col-1">
       <div id="local-players-panel">
         <div class="panel-header" id="local-players-title">👥 Игроки за этим экраном</div>
         <div class="local-player-row" data-n="1">
@@ -1218,10 +1225,6 @@
         <div class="local-player-bot-row"><select class="lp-bot-select" id="lp-bot-4" data-n="4"></select></div>
       </div>
 
-      
-
-      
-
       <div id="record-panel">
         <div class="panel-header" id="record-title">🎬 Запись партии</div>
         <div class="record-actions">
@@ -1230,7 +1233,9 @@
         </div>
         <div class="record-status" id="record-status">Запишите экран игры и поделитесь с друзьями.</div>
       </div>
+      </div>
 
+      <div class="sidebar-col" id="sidebar-col-2">
       <div id="controls">
         <button class="btn" id="restart-btn">Новая партия</button>
         <button class="btn secondary" id="rules-toggle">Правила</button>
@@ -1238,37 +1243,55 @@
         <button class="btn secondary" id="settings-toggle-btn">⚙️ Настройки</button>
       </div>
 
+      <div id="captured-panel">
+        <div class="panel-header" id="captured-title">💀 Взятые фигуры</div>
+        <div id="captured-list"></div>
+      </div>
+
       <div id="history-panel">
         <div class="panel-header" id="history-title">📜 История ходов</div>
         <div id="history-log"><div class="no-players">Ходов ещё не было.</div></div>
       </div>
+      </div>
 
-      <div id="online-panel">
-        <div class="online-header">
-          <span id="online-lobby-title">🌐 Онлайн-лобби</span>
+      <div class="sidebar-col" id="sidebar-col-3">
+      <div id="chat-panel">
+        <div class="chat-header">
+          <span id="discuss-title">💬 Обсуждение хода</span>
         </div>
-
-        <div id="online-game-bar"></div>
-        <button id="reinvite-btn" type="button" style="display:none;">🔄 Пригласить снова</button>
-
-        <div class="online-actions">
-          <button class="btn" id="quick-match-btn">🎲 Быстрая игра (случайный соперник)</button>
-          <button class="btn secondary" id="cancel-queue-btn" style="display:none;">Отменить поиск</button>
-          <button class="btn secondary" id="friends-toggle-btn">👥 Друзья</button>
-        </div>
-
-        <div class="online-status" id="online-status"></div>
-        <div class="online-players-label" id="online-players-label">Игроки онлайн — нажмите, чтобы пригласить</div>
-        <div class="online-players-list" id="online-players-list"><div class="no-players">Поиск игроков…</div></div>
-
-        <div class="online-header" style="margin-top:14px;">
-          <span id="lobby-chat-title">💬 Общий чат (лобби)</span>
-        </div>
-        <div class="lobby-chat-log" id="lobby-chat-log"></div>
-        <form class="lobby-chat-form" id="lobby-chat-form">
-          <input id="lobby-chat-input" type="text" placeholder="Написать в общий чат, найти соперника..." autocomplete="off">
-          <button type="submit" class="btn">Отправить</button>
+        <div id="chat-log"></div>
+        <form id="chat-form">
+          <select id="chat-sender"></select>
+          <input id="chat-input" type="text" placeholder="Предложите ход или скажите что-то..." autocomplete="off">
+          <button type="button" id="chat-mic-btn" class="btn secondary" title="Голосовой ввод">🎙️</button>
+          <button type="submit" class="btn">Сказать</button>
         </form>
+        <div class="voice-chat-row">
+          <button type="button" class="btn secondary" id="voice-chat-btn" style="display:none;">🔇 Говорить с игроками онлайн</button>
+          <span id="voice-chat-status"></span>
+          <span id="voice-chat-diag" style="display:block; font-size:10px; color:var(--ink-dim); opacity:.8; margin-top:2px;"></span>
+        </div>
+        <div class="voice-chat-row" id="ptt-toggle-row" style="display:none; align-items:center; gap:6px; font-size:12.5px; flex-wrap:wrap;">
+          <input type="checkbox" id="ptt-mode-toggle-2">
+          <label for="ptt-mode-toggle-2" id="ptt-mode-label-2" style="cursor:pointer;">🎙️ Режим рации</label>
+          <span id="ptt-mode-hint" style="font-size:11px; color:var(--ink-dim); width:100%;">Чтобы говорить — зажмите правую кнопку мыши или кнопку под доской</span>
+        </div>
+        <div class="file-share-row" id="file-share-row" style="display:none;">
+          <select id="file-share-target" style="display:none; background:rgba(0,0,0,.3); color:var(--ink); border:1px solid var(--brass-dim); border-radius:6px; padding:6px 8px; font-family:'Inter',sans-serif; font-size:12px;"></select>
+          <input type="file" id="file-share-input" style="display:none;">
+          <button type="button" class="btn secondary" id="file-share-btn">📎 Отправить файл</button>
+          <span id="file-share-status"></span>
+        </div>
+      </div>
+
+      <div id="timers-panel">
+        <div class="panel-header" id="timers-title">⏱️ Таймер (по умолчанию 2 часа)</div>
+        <div id="timers-list"></div>
+        <div class="timer-actions-row">
+          <button class="btn secondary" id="change-timer-btn">Изменить время</button>
+          <button class="btn secondary" id="undo-btn" title="Нужно согласие всех игроков">Отменить ход</button>
+        </div>
+      </div>
       </div>
 
     </aside>
@@ -1302,47 +1325,32 @@
       </main>
 
     <aside id="right-panels">
-      <div id="captured-panel">
-        <div class="panel-header" id="captured-title">💀 Взятые фигуры</div>
-        <div id="captured-list"></div>
-      </div>
-
-      <div id="timers-panel">
-        <div class="panel-header" id="timers-title">⏱️ Таймер (по умолчанию 2 часа)</div>
-        <div id="timers-list"></div>
-        <div class="timer-actions-row">
-          <button class="btn secondary" id="change-timer-btn">Изменить время</button>
-          <button class="btn secondary" id="undo-btn" title="Нужно согласие всех игроков">Отменить ход</button>
+      <div id="online-panel">
+        <div class="online-header">
+          <span id="online-lobby-title">🌐 Онлайн-лобби</span>
         </div>
-      </div>
 
-      <div id="chat-panel">
-        <div class="chat-header">
-          <span id="discuss-title">💬 Обсуждение хода</span>
+        <div id="online-game-bar"></div>
+        <button id="reinvite-btn" type="button" style="display:none;">🔄 Пригласить снова</button>
+
+        <div class="online-actions">
+          <button class="btn" id="quick-match-btn">🎲 Быстрая игра (случайный соперник)</button>
+          <button class="btn secondary" id="cancel-queue-btn" style="display:none;">Отменить поиск</button>
+          <button class="btn secondary" id="friends-toggle-btn">👥 Друзья</button>
         </div>
-        <div id="chat-log"></div>
-        <form id="chat-form">
-          <select id="chat-sender"></select>
-          <input id="chat-input" type="text" placeholder="Предложите ход или скажите что-то..." autocomplete="off">
-          <button type="button" id="chat-mic-btn" class="btn secondary" title="Голосовой ввод">🎙️</button>
-          <button type="submit" class="btn">Сказать</button>
+
+        <div class="online-status" id="online-status"></div>
+        <div class="online-players-label" id="online-players-label">Игроки онлайн — нажмите, чтобы пригласить</div>
+        <div class="online-players-list" id="online-players-list"><div class="no-players">Поиск игроков…</div></div>
+
+        <div class="online-header" style="margin-top:14px;">
+          <span id="lobby-chat-title">💬 Общий чат (лобби)</span>
+        </div>
+        <div class="lobby-chat-log" id="lobby-chat-log"></div>
+        <form class="lobby-chat-form" id="lobby-chat-form">
+          <input id="lobby-chat-input" type="text" placeholder="Написать в общий чат, найти соперника..." autocomplete="off">
+          <button type="submit" class="btn">Отправить</button>
         </form>
-        <div class="voice-chat-row">
-          <button type="button" class="btn secondary" id="voice-chat-btn" style="display:none;">🔇 Говорить с игроками онлайн</button>
-          <span id="voice-chat-status"></span>
-          <span id="voice-chat-diag" style="display:block; font-size:10px; color:var(--ink-dim); opacity:.8; margin-top:2px;"></span>
-        </div>
-        <div class="voice-chat-row" id="ptt-toggle-row" style="display:none; align-items:center; gap:6px; font-size:12.5px; flex-wrap:wrap;">
-          <input type="checkbox" id="ptt-mode-toggle-2">
-          <label for="ptt-mode-toggle-2" id="ptt-mode-label-2" style="cursor:pointer;">🎙️ Режим рации</label>
-          <span id="ptt-mode-hint" style="font-size:11px; color:var(--ink-dim); width:100%;">Чтобы говорить — зажмите правую кнопку мыши или кнопку под доской</span>
-        </div>
-        <div class="file-share-row" id="file-share-row" style="display:none;">
-          <select id="file-share-target" style="display:none; background:rgba(0,0,0,.3); color:var(--ink); border:1px solid var(--brass-dim); border-radius:6px; padding:6px 8px; font-family:'Inter',sans-serif; font-size:12px;"></select>
-          <input type="file" id="file-share-input" style="display:none;">
-          <button type="button" class="btn secondary" id="file-share-btn">📎 Отправить файл</button>
-          <span id="file-share-status"></span>
-        </div>
       </div>
     </aside>
     </div>
@@ -7711,7 +7719,7 @@
 
   function initDraggablePanels(){
     const sidebar = document.getElementById('sidebar');
-    if(sidebar) Array.from(sidebar.children).forEach(makeElementDraggable);
+    if(sidebar) sidebar.querySelectorAll(':scope > .sidebar-col > div').forEach(makeElementDraggable);
     const rightPanels = document.getElementById('right-panels');
     if(rightPanels) Array.from(rightPanels.children).forEach(makeElementDraggable);
     makeElementDraggable(document.getElementById('board-wrap'));
