@@ -173,7 +173,7 @@
     #sidebar{ display:contents; }
     #right-panels{ display:contents; }
     .sidebar-col{ display:contents; }
-    #app-grid{ flex-direction:row; flex-wrap:wrap; gap:12px; }
+    #app-grid{ flex-direction:row; flex-wrap:wrap; align-items:flex-start; gap:12px; }
 
     /* !important here isn't decorative — several of these panels have their
        own base #id{ width:... } rule defined LATER in this stylesheet
@@ -7654,13 +7654,19 @@
     if(panel.parentNode && panel.parentNode !== document.body && !panel._dragPlaceholder){
       const placeholder = document.createElement('div');
       placeholder.className = 'drag-placeholder';
+      // height always needs to be captured explicitly — the ID swap below
+      // keeps WIDTH in sync with #id{...} rules, but nothing sizes height
+      // the same way (it's normally just however tall the content makes
+      // it), so an empty placeholder collapses to almost nothing without
+      // this, which is exactly what let every panel below/beside it drift
+      // upward the instant a drag started.
+      placeholder.style.height = rect.height + 'px';
       if(originalId){
         placeholder.id = originalId;
         panel.removeAttribute('id');
         panel._dragOriginalId = originalId;
       } else {
         placeholder.style.width = rect.width + 'px';
-        placeholder.style.height = rect.height + 'px';
       }
       panel.parentNode.insertBefore(placeholder, panel);
       panel._dragPlaceholder = placeholder;
