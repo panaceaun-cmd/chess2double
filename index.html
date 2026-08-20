@@ -156,6 +156,7 @@
      Phone   : ≤ 767px — board and side panels stack vertically, the
                three columns stack into one, touch targets grow
      =============================================================== */
+  #mobile-panels-row{ display:none; }
   @media (max-width:1023px){
     /* wider side margin than the desktop/global 12px — reads as nearly
        edge-to-edge on a narrow screen otherwise */
@@ -178,6 +179,13 @@
     #app-grid{ gap:12px; }
     #main-col{ width:100%; }
 
+    /* this rule comes AFTER the base "display:none" above, in the same
+       stylesheet, with the same specificity (a single #id selector) — so
+       it's the later position here, not the media query condition alone,
+       that lets it win once the condition is active. Putting the base rule
+       any later than this would silently undo it regardless of screen
+       width, which is exactly what made every panel below the board
+       disappear entirely. */
     #mobile-panels-row{
       display:flex; flex-direction:row; align-items:flex-start; gap:12px;
     }
@@ -186,7 +194,6 @@
       display:flex; flex-direction:column; gap:12px;
     }
   }
-  #mobile-panels-row{ display:none; }
   @media (max-width:420px){
     /* smallest phones still get a visible side margin — just a touch
        tighter than the 22px used above 420px wide */
@@ -1382,8 +1389,8 @@
     </aside>
     </div>
     <div id="mobile-panels-row">
-      <div id="mobile-col-left"></div>
-      <div id="mobile-col-right"></div>
+      <div id="mobile-col-left" class="mobile-col"></div>
+      <div id="mobile-col-right" class="mobile-col"></div>
     </div>
   </div>
 
