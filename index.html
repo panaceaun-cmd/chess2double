@@ -157,11 +157,26 @@
                three columns stack into one, touch targets grow
      =============================================================== */
   @media (max-width:767px){
-    #sidebar{ flex-direction:column; }
-    .sidebar-col{ max-width:100%; width:100%; }
-    #top-row{ flex-direction:column; }
-    #right-panels{ flex:none; max-width:100%; width:100%; }
+    /* Collapse every wrapper level down to its children so all panels
+       become direct flex items of #app-grid — that's what lets a single
+       "order" value below sequence them freely, in a completely different
+       order than the desktop's 3-column grouping, without duplicating any
+       HTML for a separate mobile layout. */
+    #top-row{ display:contents; }
+    #sidebar{ display:contents; }
+    #right-panels{ display:contents; }
+    .sidebar-col{ display:contents; }
     #app-grid{ gap:12px; }
+
+    #main-col{ order:1; flex:none; width:100%; }
+    #controls{ order:2; width:100%; }
+    #chat-panel{ order:3; width:100%; }
+    #timers-panel{ order:4; width:100%; }
+    #local-players-panel{ order:5; width:100%; }
+    #online-panel{ order:6; width:100%; }
+    #captured-panel{ order:7; width:100%; }
+    #record-panel{ order:8; width:100%; }
+    #history-panel{ order:9; width:100%; }
   }
   @media (max-width:420px){
     /* smallest phones: trim outer padding further so nothing crowds */
