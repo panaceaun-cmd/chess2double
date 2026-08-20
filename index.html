@@ -7699,7 +7699,9 @@
     handle.title = 'Перетащить';
     el.appendChild(handle);
 
-    let dragging = false, offsetX = 0, offsetY = 0;
+    let dragging = false, pendingDrag = false, offsetX = 0, offsetY = 0;
+    let downPageX = 0, downPageY = 0, pendingPageLeft = 0, pendingPageTop = 0;
+    const DRAG_THRESHOLD_PX = 6;
 
     function getPoint(e){
       if(e.touches && e.touches[0]) return {x:e.touches[0].pageX, y:e.touches[0].pageY};
@@ -7710,15 +7712,27 @@
     function onDown(e){
       if(e.cancelable) e.preventDefault();
       const p = getPoint(e);
+      downPageX = p.x; downPageY = p.y;
       const rect = el.getBoundingClientRect();
       const pageLeft = rect.left + window.scrollX;
       const pageTop = rect.top + window.scrollY;
       offsetX = p.x - pageLeft;
       offsetY = p.y - pageTop;
-      if(!el.classList.contains('panel-floating')){
-        floatPanel(el, pageLeft, pageTop);
+      // a mere touch/click on the handle no longer floats the panel right
+      // away — a brief tap-and-release used to be enough to strand it in a
+      // permanently-floating state (position:absolute, pinned to whatever
+      // page coordinates it happened to be at), which could end up
+      // overlapping other content the moment anything else on the page
+      // reflowed later (like new chat messages arriving). Floating now
+      // only kicks in once the pointer has actually moved past a small
+      // threshold, same as how most drag interactions distinguish a tap
+      // from a real drag.
+      if(el.classList.contains('panel-floating')){
+        dragging = true;
+      } else {
+        pendingDrag = true;
+        pendingPageLeft = pageLeft; pendingPageTop = pageTop;
       }
-      dragging = true;
       if(e.pointerId !== undefined && handle.setPointerCapture){
         try{ handle.setPointerCapture(e.pointerId); }catch(err){}
       }
@@ -7732,9 +7746,17 @@
     }
 
     function onMove(e){
-      if(!dragging) return;
+      if(!dragging && !pendingDrag) return;
       if(e.cancelable) e.preventDefault();
       const p = getPoint(e);
+      if(pendingDrag && !dragging){
+        const moved = Math.hypot(p.x - downPageX, p.y - downPageY);
+        if(moved < DRAG_THRESHOLD_PX) return; // still just a tap so far
+        floatPanel(el, pendingPageLeft, pendingPageTop);
+        pendingDrag = false;
+        dragging = true;
+      }
+      if(!dragging) return;
       const rect = el.getBoundingClientRect();
       let left = p.x - offsetX, top = p.y - offsetY;
       [left, top] = clampToPage(left, top, rect.width, rect.height);
@@ -7743,8 +7765,9 @@
     }
 
     function onUp(){
-      if(!dragging) return;
+      const wasDragging = dragging;
       dragging = false;
+      pendingDrag = false;
       document.removeEventListener('pointermove', onMove);
       document.removeEventListener('pointerup', onUp);
       document.removeEventListener('mousemove', onMove);
@@ -7752,12 +7775,16 @@
       document.removeEventListener('touchmove', onMove);
       document.removeEventListener('touchend', onUp);
       document.removeEventListener('touchcancel', onUp);
+      if(!wasDragging) return; // just a tap — the panel never actually floated, nothing to save
       // anchored to the page (position:absolute) — scrolls with the rest of the page
-      panelPositions[el.id] = {
-        left: parseFloat(el.style.left) || 0,
-        top: parseFloat(el.style.top) || 0
-      };
-      savePanelPositions();
+      const posId = el._dragOriginalId || el.id;
+      if(posId){
+        panelPositions[posId] = {
+          left: parseFloat(el.style.left) || 0,
+          top: parseFloat(el.style.top) || 0
+        };
+        savePanelPositions();
+      }
     }
 
     handle.addEventListener('pointerdown', onDown);
