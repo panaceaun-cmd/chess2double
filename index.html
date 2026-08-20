@@ -161,37 +161,32 @@
        edge-to-edge on a narrow screen otherwise */
     body{ padding-left:22px; padding-right:22px; }
 
-    /* Collapse every wrapper level down to its children so all panels
-       become direct flex items of #app-grid, then lay them out as a
-       left/right pair of columns: switching to a wrapping ROW flow and
-       giving each panel ~50% width means every two consecutive items
-       (by "order") land side by side, while the board stays full-width
-       on its own row above them. This covers phones and tablets alike —
-       one layout for the whole non-desktop range, as opposed to the
-       desktop's separate 3-column grouping. */
+    /* Collapse the desktop wrapper levels so they contribute nothing to
+       layout — the 8 panels get physically MOVED (via JS, see
+       layoutMobilePanels()) into #mobile-col-left/#mobile-col-right
+       instead. This replaces an earlier attempt that kept them as flex
+       items paired by width — that approach shared each row's height
+       between its left/right item (an unavoidable property of flexbox
+       row-wrap and of CSS grid alike), which is exactly what left a big
+       empty gap under any panel shorter than its row partner. Two real,
+       separate flex-column containers don't have that limitation: each
+       one's height is just whatever its own content adds up to. */
     #top-row{ display:contents; }
     #sidebar{ display:contents; }
     #right-panels{ display:contents; }
     .sidebar-col{ display:contents; }
-    #app-grid{ flex-direction:row; flex-wrap:wrap; align-items:flex-start; gap:12px; }
+    #app-grid{ gap:12px; }
+    #main-col{ width:100%; }
 
-    /* !important here isn't decorative — several of these panels have their
-       own base #id{ width:... } rule defined LATER in this stylesheet
-       (same specificity as an ID selector, so normally the later one in
-       source order wins regardless of the media query). Without this,
-       e.g. #chat-panel silently reverts to width:100%, which doesn't just
-       widen that one panel — it shoves every following panel's pairing off
-       by one, which is exactly the broken layout from the screenshot. */
-    #main-col{ order:1; flex:none; width:100% !important; }
-    #controls{ order:2; flex:none; width:calc(50% - 6px) !important; }
-    #online-panel{ order:3; flex:none; width:calc(50% - 6px) !important; }
-    #chat-panel{ order:4; flex:none; width:calc(50% - 6px) !important; }
-    #captured-panel{ order:5; flex:none; width:calc(50% - 6px) !important; }
-    #timers-panel{ order:6; flex:none; width:calc(50% - 6px) !important; }
-    #record-panel{ order:7; flex:none; width:calc(50% - 6px) !important; }
-    #local-players-panel{ order:8; flex:none; width:calc(50% - 6px) !important; }
-    #history-panel{ order:9; flex:none; width:calc(50% - 6px) !important; }
+    #mobile-panels-row{
+      display:flex; flex-direction:row; align-items:flex-start; gap:12px;
+    }
+    .mobile-col{
+      flex:1 1 0; min-width:0;
+      display:flex; flex-direction:column; gap:12px;
+    }
   }
+  #mobile-panels-row{ display:none; }
   @media (max-width:420px){
     /* smallest phones still get a visible side margin — just a touch
        tighter than the 22px used above 420px wide */
@@ -1385,6 +1380,10 @@
         </form>
       </div>
     </aside>
+    </div>
+    <div id="mobile-panels-row">
+      <div id="mobile-col-left"></div>
+      <div id="mobile-col-right"></div>
     </div>
   </div>
 
@@ -7807,13 +7806,65 @@
     }
   }
 
+  const ALL_DRAGGABLE_PANEL_IDS = [
+    'local-players-panel','record-panel','controls','captured-panel','history-panel',
+    'chat-panel','timers-panel','online-panel'
+  ];
   function initDraggablePanels(){
-    const sidebar = document.getElementById('sidebar');
-    if(sidebar) sidebar.querySelectorAll(':scope > .sidebar-col > div').forEach(makeElementDraggable);
-    const rightPanels = document.getElementById('right-panels');
-    if(rightPanels) Array.from(rightPanels.children).forEach(makeElementDraggable);
+    ALL_DRAGGABLE_PANEL_IDS.forEach(id => makeElementDraggable(document.getElementById(id)));
     makeElementDraggable(document.getElementById('board-wrap'));
   }
+
+  // Mobile/tablet layout: two INDEPENDENT columns (left/right), each just a
+  // plain flex-column stack — every panel physically moves into whichever
+  // column it belongs in, in the exact order given here, so each column's
+  // height is simply whatever its own content adds up to. No shared "row
+  // height" between left and right the way flex-wrap pairing or CSS grid
+  // rows would force, which is what used to leave a gap under any panel
+  // shorter than whatever ended up next to it.
+  const MOBILE_COL_LEFT_ORDER = ['controls', 'chat-panel', 'timers-panel', 'local-players-panel'];
+  const MOBILE_COL_RIGHT_ORDER = ['online-panel', 'captured-panel', 'record-panel', 'history-panel'];
+  const MOBILE_TABLET_MAX_WIDTH = 1023;
+  const desktopPanelHomes = {};
+  function captureDesktopPanelHomes(){
+    [...MOBILE_COL_LEFT_ORDER, ...MOBILE_COL_RIGHT_ORDER].forEach(id => {
+      if(desktopPanelHomes[id]) return; // only capture once, before the first move
+      const el = document.getElementById(id);
+      if(el) desktopPanelHomes[id] = { parent: el.parentNode, next: el.nextSibling };
+    });
+  }
+  function layoutMobilePanels(){
+    const leftCol = document.getElementById('mobile-col-left');
+    const rightCol = document.getElementById('mobile-col-right');
+    if(!leftCol || !rightCol) return;
+    if(window.innerWidth <= MOBILE_TABLET_MAX_WIDTH){
+      captureDesktopPanelHomes();
+      MOBILE_COL_LEFT_ORDER.forEach(id => {
+        const el = document.getElementById(id);
+        if(el && el.parentNode !== leftCol) leftCol.appendChild(el);
+      });
+      MOBILE_COL_RIGHT_ORDER.forEach(id => {
+        const el = document.getElementById(id);
+        if(el && el.parentNode !== rightCol) rightCol.appendChild(el);
+      });
+    } else {
+      [...MOBILE_COL_LEFT_ORDER, ...MOBILE_COL_RIGHT_ORDER].forEach(id => {
+        const el = document.getElementById(id);
+        const home = desktopPanelHomes[id];
+        if(!el || !home || el.parentNode === home.parent) return;
+        if(home.next && home.next.parentNode === home.parent){
+          home.parent.insertBefore(el, home.next);
+        } else {
+          home.parent.appendChild(el);
+        }
+      });
+    }
+  }
+  let mobileLayoutResizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(mobileLayoutResizeTimer);
+    mobileLayoutResizeTimer = setTimeout(layoutMobilePanels, 150);
+  });
 
   // Keep "Взятые фигуры" (top of the right column) level with the board's own
   // top edge, not with the ad banner / mode picker above it in the main column
@@ -7865,6 +7916,7 @@
     newGame();
     loadProfile();
     refreshAdSlots();
+    layoutMobilePanels();
     initDraggablePanels();
     alignRightPanelsToBoard();
     setTimeout(alignRightPanelsToBoard, 300); // re-check once ad slots/fonts settle
