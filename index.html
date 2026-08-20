@@ -175,15 +175,22 @@
     .sidebar-col{ display:contents; }
     #app-grid{ flex-direction:row; flex-wrap:wrap; gap:12px; }
 
-    #main-col{ order:1; flex:none; width:100%; }
-    #controls{ order:2; flex:none; width:calc(50% - 6px); }
-    #online-panel{ order:3; flex:none; width:calc(50% - 6px); }
-    #chat-panel{ order:4; flex:none; width:calc(50% - 6px); }
-    #captured-panel{ order:5; flex:none; width:calc(50% - 6px); }
-    #timers-panel{ order:6; flex:none; width:calc(50% - 6px); }
-    #record-panel{ order:7; flex:none; width:calc(50% - 6px); }
-    #local-players-panel{ order:8; flex:none; width:calc(50% - 6px); }
-    #history-panel{ order:9; flex:none; width:calc(50% - 6px); }
+    /* !important here isn't decorative — several of these panels have their
+       own base #id{ width:... } rule defined LATER in this stylesheet
+       (same specificity as an ID selector, so normally the later one in
+       source order wins regardless of the media query). Without this,
+       e.g. #chat-panel silently reverts to width:100%, which doesn't just
+       widen that one panel — it shoves every following panel's pairing off
+       by one, which is exactly the broken layout from the screenshot. */
+    #main-col{ order:1; flex:none; width:100% !important; }
+    #controls{ order:2; flex:none; width:calc(50% - 6px) !important; }
+    #online-panel{ order:3; flex:none; width:calc(50% - 6px) !important; }
+    #chat-panel{ order:4; flex:none; width:calc(50% - 6px) !important; }
+    #captured-panel{ order:5; flex:none; width:calc(50% - 6px) !important; }
+    #timers-panel{ order:6; flex:none; width:calc(50% - 6px) !important; }
+    #record-panel{ order:7; flex:none; width:calc(50% - 6px) !important; }
+    #local-players-panel{ order:8; flex:none; width:calc(50% - 6px) !important; }
+    #history-panel{ order:9; flex:none; width:calc(50% - 6px) !important; }
   }
   @media (max-width:420px){
     /* smallest phones still get a visible side margin — just a touch
@@ -7733,7 +7740,12 @@
     handle.addEventListener('touchstart', onDown, {passive:false});
 
     const saved = panelPositions[el.id];
-    if(saved && window.innerWidth > 767){
+    // must match the actual layout breakpoint (see the max-width:1023px
+    // media query) — a stale threshold here is exactly what let a
+    // previously-dragged position resurrect itself as a panel floating on
+    // top of the board on tablet-width screens, which are laid out as
+    // mobile/tablet (not desktop) starting at 1023px.
+    if(saved && window.innerWidth > 1023){
       const rect = el.getBoundingClientRect();
       let [left, top] = clampToPage(saved.left, saved.top, rect.width, rect.height);
       floatPanel(el, left, top);
