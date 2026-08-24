@@ -239,12 +239,16 @@
   }
   #local-players-title, #online-lobby-title{
     font-size:20px; font-weight:700; letter-spacing:.02em;
-    color:#f4dfa0;
-    text-shadow:0 0 10px rgba(232,195,62,.45), 0 2px 3px rgba(0,0,0,.6);
+    color:#1a1206;
+    background:linear-gradient(180deg, #f7de84, #e8c33e);
+    display:inline-block;
+    padding:6px 14px;
+    border-radius:8px;
+    box-shadow:0 2px 6px rgba(0,0,0,.4);
     line-height:1.3;
   }
   @media (max-width:600px){
-    #local-players-title, #online-lobby-title{ font-size:16px; }
+    #local-players-title, #online-lobby-title{ font-size:16px; padding:5px 10px; }
   }
   .settings-row{
     display:flex; align-items:center; justify-content:space-between;
@@ -8276,7 +8280,16 @@
     // previously-dragged position resurrect itself as a panel floating on
     // top of the board on tablet-width screens, which are laid out as
     // mobile/tablet (not desktop) starting at 1023px.
-    if(saved && window.innerWidth > 1023){
+    //
+    // Also skip restoring onto a currently-hidden panel (display:none, from
+    // the under-board toggle buttons defaulting chat/history/record to
+    // closed) — getBoundingClientRect() on a hidden element always reads
+    // zero width, so floating it here would capture and lock in a width of
+    // 0px. This was the actual root cause of the panel opening broken and
+    // paper-thin the moment its toggle button revealed it later — it
+    // wasn't really about dragging at all, restoring here just always ran
+    // before the panel ever had a real size to measure.
+    if(saved && window.innerWidth > 1023 && getComputedStyle(el).display !== 'none'){
       const rect = el.getBoundingClientRect();
       let [left, top] = clampToPage(saved.left, saved.top, rect.width, rect.height);
       floatPanel(el, left, top);
@@ -8431,6 +8444,19 @@
     if(!panel) return;
     const open = !!ubcPanelState[panelId];
     panel.style.display = open ? '' : 'none';
+    if(open && panel.classList.contains('panel-floating')){
+      // Only auto-fix a suspiciously narrow floating panel (the broken-
+      // state signature from a stale/bad captured width — most often from
+      // the saved-position restore running while this panel still had
+      // display:none, capturing a width of 0) — a panel someone
+      // deliberately dragged somewhere reasonable keeps its chosen spot.
+      // Must check AFTER setting display, since a hidden element's
+      // getBoundingClientRect() always reads all-zero regardless of any
+      // inline width, which would otherwise hide the very case this
+      // exists to catch.
+      const w = panel.getBoundingClientRect().width;
+      if(w < 150) unfloatPanel(panel);
+    }
   }
   function refreshUbcButtonState(btn){
     const ids = btn.dataset.toggle.split(',');
