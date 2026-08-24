@@ -2318,7 +2318,7 @@
     if(boardEl){
       const boardWidth = boardEl.getBoundingClientRect().width;
       if(boardWidth > 0){
-        ['corner-bars-top', 'corner-bars-bottom'].forEach(id => {
+        ['corner-bars-top', 'corner-bars-bottom', 'under-board-controls'].forEach(id => {
           const row = document.getElementById(id);
           if(row) row.style.width = boardWidth + 'px';
         });
