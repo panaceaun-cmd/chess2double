@@ -6399,7 +6399,7 @@
     }
     const n = MODE_PLAYER_NUM[mode][ctrl];
     if(isBotSeat(n)) return '🤖 ' + t('botTag') + ' ' + botLevel[n];
-    return localPlayerName(n) || colorLabel(color);
+    return localPlayerName(n) || playerLabel(n);
   }
   function renderCornerBars(){
     ['b','g','w','y'].forEach(c => {
