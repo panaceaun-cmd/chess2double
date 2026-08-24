@@ -449,13 +449,13 @@
   .ubc-btn{
     background:linear-gradient(180deg, #ecd190, var(--brass) 70%);
     border:1px solid var(--brass); border-radius:8px;
-    color:#2a1c0c; padding:8px 13px; font-family:'Inter',sans-serif; font-size:15px;
+    color:#2a1c0c; padding:8px 14px; font-family:'Inter',sans-serif; font-size:16.5px;
     font-weight:700; cursor:pointer; white-space:nowrap;
     box-shadow:0 3px 8px rgba(0,0,0,.35);
   }
   .ubc-btn:hover{ border-color:#fff3d6; filter:brightness(1.06); }
   .ubc-btn.panel-open{ border-color:#fff3d6; filter:brightness(1.12); box-shadow:0 0 0 2px rgba(255,255,255,.25), 0 3px 8px rgba(0,0,0,.35); }
-  @media (max-width:600px){ .ubc-btn{ font-size:13px; padding:6px 10px; } }
+  @media (max-width:600px){ .ubc-btn{ font-size:14px; padding:6px 11px; } }
   .ubc-play-btn{
     font-size:23px; padding:12px 22px;
     border-radius:10px;
@@ -1456,13 +1456,13 @@
         </div>
         <div id="under-board-controls">
           <button class="ubc-btn ubc-play-btn" id="ubc-play" type="button" data-toggle="local-players-panel,online-panel">▶️ Играть</button>
-          <button class="ubc-btn" id="ubc-restart" type="button">🔄 Новая партия</button>
-          <button class="ubc-btn" id="ubc-undo" type="button" data-action="undo">↩️ Отменить ход</button>
-          <button class="ubc-btn" id="ubc-settings" type="button" data-action="settings">⚙️ Настройки</button>
-          <button class="ubc-btn" id="ubc-player-chat" type="button" data-toggle="chat-panel">🎙️ Голосовая связь/Чат</button>
-          <button class="ubc-btn" id="ubc-history" type="button" data-toggle="history-panel">📜 История ходов</button>
-          <button class="ubc-btn" id="ubc-stats" type="button" data-action="stats">📊 Статистика</button>
-          <button class="ubc-btn" id="ubc-record" type="button">🔴 Начать запись</button>
+          <button class="ubc-btn" id="ubc-restart" type="button">Новая партия</button>
+          <button class="ubc-btn" id="ubc-undo" type="button" data-action="undo">Отменить ход</button>
+          <button class="ubc-btn" id="ubc-settings" type="button" data-action="settings">Настройки</button>
+          <button class="ubc-btn" id="ubc-player-chat" type="button" data-toggle="chat-panel">Голосовая связь/Чат</button>
+          <button class="ubc-btn" id="ubc-history" type="button" data-toggle="history-panel">История ходов</button>
+          <button class="ubc-btn" id="ubc-stats" type="button" data-action="stats">Статистика</button>
+          <button class="ubc-btn" id="ubc-record" type="button">Начать запись</button>
         </div>
         <button id="pause-btn" type="button" aria-label="Пауза">
           <span class="pause-icon-bars"><span></span><span></span></span>
@@ -2660,7 +2660,7 @@
     const btn = document.getElementById('ubc-record');
     if(!btn) return;
     const recording = mediaRecorder && mediaRecorder.state === 'recording';
-    btn.textContent = recording ? ('⏹ ' + t('recordStopBtn')) : ('🔴 ' + t('ubcRecordBtn'));
+    btn.textContent = recording ? t('recordStopBtn') : t('ubcRecordBtn');
     btn.classList.toggle('panel-open', recording);
   }
   document.getElementById('ubc-record').addEventListener('click', toggleRecording);
@@ -2877,16 +2877,15 @@
     setText('reset-layout-btn', t('resetLayoutBtn'));
     setText('ubc-play', '▶️ ' + t('ubcPlayBtn'));
     setText('top-rules-btn', '📖 ' + t('rulesBtn'));
-    setText('ubc-restart', '🔄 ' + t('newGameBtn'));
-    setText('ubc-undo', '↩️ ' + t('ubcUndoBtn'));
+    setText('ubc-restart', t('newGameBtn'));
+    setText('ubc-undo', t('ubcUndoBtn'));
     setText('restart-confirm-title', t('restartConfirmTitle'));
     setText('restart-confirm-yes', t('restartConfirmYesBtn'));
     setText('restart-confirm-no', t('restartConfirmNoBtn'));
-    setText('ubc-settings', '⚙️ ' + t('ubcSettingsBtn'));
-    setText('ubc-lobby-chat', '🌐 ' + t('ubcLobbyChatBtn'));
-    setText('ubc-player-chat', t('discussTitle'));
-    setText('ubc-history', '📜 ' + t('ubcHistoryBtn'));
-    setText('ubc-stats', '📊 ' + t('ubcStatsBtn'));
+    setText('ubc-settings', t('ubcSettingsBtn'));
+    setText('ubc-player-chat', t('discussTitle').replace(/^[^\p{L}]+/u, ''));
+    setText('ubc-history', t('ubcHistoryBtn'));
+    setText('ubc-stats', t('ubcStatsBtn'));
     if(typeof updateUbcRecordLabel === 'function') updateUbcRecordLabel();
     if(typeof applyPanelsLockedState === 'function') applyPanelsLockedState();
     renderCapturedPanel();
