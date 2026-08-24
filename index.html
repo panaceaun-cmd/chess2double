@@ -6343,7 +6343,10 @@
     document.getElementById('pause-btn-label').textContent = isPaused ? t('resumeLabel') : t('pauseLabel');
     overlay.classList.toggle('show', isPaused);
     appendChatMessage(t('systemLabel'), isPaused ? t('pausedBanner') : t('resumeLabel') + '.', true);
-    if(!isPaused){
+    if(isPaused){
+      releaseWakeLock();
+    } else {
+      requestWakeLock();
       maybeTriggerBotMove();
     }
   }
@@ -6644,6 +6647,37 @@
     return b;
   }
 
+  // ================= SCREEN WAKE LOCK =================
+  // Keeps the screen from dimming/locking during a game — phones treat tap-
+  // free thinking time as inactivity otherwise. Not supported in every
+  // browser (notably older Safari), so every call here is wrapped so an
+  // unsupported/denied request just does nothing rather than breaking
+  // anything else.
+  let wakeLockSentinel = null;
+  async function requestWakeLock(){
+    if(!('wakeLock' in navigator)) return;
+    if(document.visibilityState !== 'visible') return;
+    try{
+      wakeLockSentinel = await navigator.wakeLock.request('screen');
+      wakeLockSentinel.addEventListener('release', () => { wakeLockSentinel = null; });
+    }catch(e){
+      // permission denied, unsupported, or battery saver active — silently
+      // ignore, the game works the same either way, just without this
+      wakeLockSentinel = null;
+    }
+  }
+  function releaseWakeLock(){
+    if(wakeLockSentinel){ try{ wakeLockSentinel.release(); }catch(e){} wakeLockSentinel = null; }
+  }
+  // the OS/browser always releases the lock the moment the tab is hidden
+  // (switching apps, locking the phone) — re-request it once the player
+  // comes back, but only if a game is actually in progress and not paused
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState === 'visible' && gameStarted && !gameOver && !isPaused){
+      requestWakeLock();
+    }
+  });
+
   function newGame(){
     updateOwnerForMode();
     board = initBoard();
@@ -6677,6 +6711,7 @@
     updateTicker(t('newGameTicker'), t('turnWord') + ': ' + colorLabel(turn));
     showMoveToast('', t('turnWord') + ': ' + colorLabel(turn));
     maybeTriggerBotMove();
+    requestWakeLock();
   }
 
   function inBounds(r,c){ return r>=0 && r<ROWS && c>=0 && c<COLS; }
@@ -7711,6 +7746,7 @@
   // reliably (unlike beforeunload on mobile) and still gives pending network
   // writes a moment to go out.
   window.addEventListener('pagehide', () => {
+    releaseWakeLock();
     if(voiceActive) stopVoiceChatInternal();
     if(groupVoiceActive) stopGroupVoice();
     stopFileShareListener();
