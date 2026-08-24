@@ -1354,14 +1354,14 @@
         <div class="local-player-bot-row"><select class="lp-bot-select" id="lp-bot-4" data-n="4"></select></div>
       </div>
 
-      <div id="record-panel">
-        <div class="panel-header" id="record-title">🎬 Запись партии</div>
-        <div class="record-actions">
-          <button class="btn" id="record-start-btn">🔴 Начать запись</button>
-          <button class="btn secondary" id="record-stop-btn" style="display:none;">⏹ Остановить и сохранить</button>
-        </div>
-        <div class="record-status" id="record-status">Запишите экран игры и поделитесь с друзьями.</div>
-      </div>
+      <!-- record-start-btn/record-stop-btn stay in the page, hidden — the
+           under-board 🔴 Начать запись button now triggers them directly
+           via toggleRecording() instead of revealing this panel first.
+           record-status stays lightly visible so recording state and the
+           post-save share button are still reachable. -->
+      <button class="btn" id="record-start-btn" style="display:none;">🔴 Начать запись</button>
+      <button class="btn secondary" id="record-stop-btn" style="display:none;">⏹ Остановить и сохранить</button>
+      <div class="record-status" id="record-status" style="text-align:center; margin-top:6px;"></div>
       </div>
 
       <div class="sidebar-col" id="sidebar-col-2">
@@ -1460,7 +1460,7 @@
           <button class="ubc-btn" id="ubc-player-chat" type="button" data-toggle="chat-panel">🎙️ Голосовая связь/Чат</button>
           <button class="ubc-btn" id="ubc-history" type="button" data-toggle="history-panel">📜 История ходов</button>
           <button class="ubc-btn" id="ubc-stats" type="button" data-action="stats">📊 Статистика</button>
-          <button class="ubc-btn" id="ubc-record" type="button" data-toggle="record-panel">🔴 Начать запись</button>
+          <button class="ubc-btn" id="ubc-record" type="button">🔴 Начать запись</button>
         </div>
         <button id="pause-btn" type="button" aria-label="Пауза">
           <span class="pause-icon-bars"><span></span><span></span></span>
@@ -2553,8 +2553,10 @@
       document.getElementById('record-start-btn').style.display = 'none';
       document.getElementById('record-stop-btn').style.display = 'inline-block';
       document.getElementById('record-status').innerHTML = '<span class="rec-dot"></span>' + escapeHtml(t('recordingMsg'));
+      updateUbcRecordLabel();
     }catch(e){
       document.getElementById('record-status').textContent = t('recordCancelled');
+      updateUbcRecordLabel();
     }
   }
 
@@ -2563,6 +2565,7 @@
     if(recordStream) recordStream.getTracks().forEach(t=>t.stop());
     document.getElementById('record-start-btn').style.display = 'inline-block';
     document.getElementById('record-stop-btn').style.display = 'none';
+    updateUbcRecordLabel();
   }
 
   function saveRecording(){
@@ -2592,6 +2595,25 @@
   if(!recordSupported()){
     document.getElementById('record-status').textContent = t('recordUnsupported');
   }
+  // The under-board 🔴 Начать запись button replaces the old panel with
+  // its two separate buttons — this one toggles between them based on
+  // mediaRecorder's actual current state, and updates its own label to
+  // match, so a single button covers the whole start/stop cycle.
+  function toggleRecording(){
+    if(mediaRecorder && mediaRecorder.state === 'recording'){
+      stopRecording();
+    } else {
+      startRecording();
+    }
+  }
+  function updateUbcRecordLabel(){
+    const btn = document.getElementById('ubc-record');
+    if(!btn) return;
+    const recording = mediaRecorder && mediaRecorder.state === 'recording';
+    btn.textContent = recording ? ('⏹ ' + t('recordStopBtn')) : ('🔴 ' + t('ubcRecordBtn'));
+    btn.classList.toggle('panel-open', recording);
+  }
+  document.getElementById('ubc-record').addEventListener('click', toggleRecording);
   // ================= END SCREEN RECORDING =================
 
   // ================= LANGUAGE =================
@@ -2815,7 +2837,7 @@
     setText('ubc-player-chat', t('discussTitle'));
     setText('ubc-history', '📜 ' + t('ubcHistoryBtn'));
     setText('ubc-stats', '📊 ' + t('ubcStatsBtn'));
-    setText('ubc-record', '🔴 ' + t('ubcRecordBtn'));
+    if(typeof updateUbcRecordLabel === 'function') updateUbcRecordLabel();
     if(typeof applyPanelsLockedState === 'function') applyPanelsLockedState();
     renderCapturedPanel();
 
@@ -8262,7 +8284,7 @@
   }
 
   const ALL_DRAGGABLE_PANEL_IDS = [
-    'local-players-panel','record-panel','captured-panel','history-panel',
+    'local-players-panel','captured-panel','history-panel',
     'chat-panel','timers-panel','online-panel'
   ];
   function initDraggablePanels(){
@@ -8278,7 +8300,7 @@
   // rows would force, which is what used to leave a gap under any panel
   // shorter than whatever ended up next to it.
   const MOBILE_COL_LEFT_ORDER = ['chat-panel', 'timers-panel', 'local-players-panel'];
-  const MOBILE_COL_RIGHT_ORDER = ['online-panel', 'captured-panel', 'record-panel', 'history-panel'];
+  const MOBILE_COL_RIGHT_ORDER = ['online-panel', 'captured-panel', 'history-panel'];
   const MOBILE_TABLET_MAX_WIDTH = 1023;
   const desktopPanelHomes = {};
   function captureDesktopPanelHomes(){
@@ -8390,7 +8412,7 @@
   // adding a third one that also wants to move these same panels around
   // would fight both of them. Position is still fully adjustable via the
   // existing drag handles once a panel is visible.
-  const UBC_TOGGLE_PANEL_IDS = ['local-players-panel', 'online-panel', 'chat-panel', 'history-panel', 'record-panel'];
+  const UBC_TOGGLE_PANEL_IDS = ['local-players-panel', 'online-panel', 'chat-panel', 'history-panel'];
   const UBC_PANEL_STATE_KEY = 'chess2-ubc-panel-state';
   let ubcPanelState = {};
   try{ ubcPanelState = JSON.parse(localStorage.getItem(UBC_PANEL_STATE_KEY) || '{}'); }catch(e){ ubcPanelState = {}; }
