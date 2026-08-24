@@ -384,6 +384,7 @@
     margin-bottom:10px;
     text-align:center;
   }
+  #top-rules-btn-row{ display:flex; justify-content:center; margin-bottom:14px; }
   #status{
     display:none;
   }
@@ -422,6 +423,13 @@
     margin-bottom:8px; width:100%;
   }
   #corner-bars-bottom{ margin-bottom:0; margin-top:8px; }
+  /* These three duplicate what's now shown elsewhere: #controls' commands
+     all have their own under-board buttons, and #timers-panel/#captured-panel
+     duplicate the per-color corner bars around the board. Hidden rather than
+     deleted from the HTML — #undo-btn, #stats-btn, #settings-toggle-btn,
+     #restart-btn and #rules-toggle live inside these and are still reached
+     directly by id from the under-board buttons below. */
+  #controls, #timers-panel, #captured-panel{ display:none; }
   #under-board-controls{
     display:flex; flex-wrap:wrap; gap:6px; justify-content:center;
     margin-top:10px; width:100%;
@@ -1294,6 +1302,9 @@
 
   <h1 id="game-title">CHESS 2 DOUBLE</h1>
   <div class="subtitle" id="subtitle-text">Доска 8×16 — две классические доски, сросшиеся боками. Порядок ходов: белые → чёрные → жёлтые → серые → снова белые.</div>
+  <div id="top-rules-btn-row">
+    <button class="btn secondary" id="top-rules-btn" type="button">📖 Правила</button>
+  </div>
 
   <div id="app-grid">
     <aside id="sidebar">
@@ -1426,6 +1437,8 @@
         </div>
         <div id="under-board-controls">
           <button class="ubc-btn ubc-play-btn" id="ubc-play" type="button" data-toggle="local-players-panel,online-panel">▶️ Играть</button>
+          <button class="ubc-btn" id="ubc-restart" type="button" data-action="restart">🔄 Новая партия</button>
+          <button class="ubc-btn" id="ubc-rules" type="button" data-action="rules">📖 Правила</button>
           <button class="ubc-btn" id="ubc-undo" type="button" data-action="undo">↩️ Отменить ход</button>
           <button class="ubc-btn" id="ubc-settings" type="button" data-action="settings">⚙️ Настройки</button>
           <button class="ubc-btn" id="ubc-player-chat" type="button" data-toggle="chat-panel">🎙️ Голосовая связь/Чат</button>
@@ -2765,6 +2778,9 @@
     setText('reset-layout-label', t('resetLayoutLabel'));
     setText('reset-layout-btn', t('resetLayoutBtn'));
     setText('ubc-play', '▶️ ' + t('ubcPlayBtn'));
+    setText('ubc-restart', '🔄 ' + t('newGameBtn'));
+    setText('ubc-rules', '📖 ' + t('rulesBtn'));
+    setText('top-rules-btn', '📖 ' + t('rulesBtn'));
     setText('ubc-undo', '↩️ ' + t('ubcUndoBtn'));
     setText('ubc-settings', '⚙️ ' + t('ubcSettingsBtn'));
     setText('ubc-lobby-chat', '🌐 ' + t('ubcLobbyChatBtn'));
@@ -8338,6 +8354,8 @@
   // on that action (online vs offline, game-over state, etc.) still applies
   // exactly as it already did, with nothing duplicated here.
   const UBC_ACTION_TARGETS = {
+    restart: 'restart-btn',
+    rules: 'rules-toggle',
     undo: 'undo-btn',
     settings: 'settings-toggle-btn',
     stats: 'stats-btn'
@@ -8349,6 +8367,10 @@
       const target = document.getElementById(targetId);
       if(target) target.click();
     });
+  });
+  document.getElementById('top-rules-btn').addEventListener('click', () => {
+    const target = document.getElementById('rules-toggle');
+    if(target) target.click();
   });
   // ================= END UNDER-BOARD CONTROL BUTTONS =================
 
