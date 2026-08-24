@@ -423,13 +423,12 @@
     margin-bottom:8px; width:100%;
   }
   #corner-bars-bottom{ margin-bottom:0; margin-top:8px; }
-  /* These three duplicate what's now shown elsewhere: #controls' commands
-     all have their own under-board buttons, and #timers-panel/#captured-panel
-     duplicate the per-color corner bars around the board. Hidden rather than
-     deleted from the HTML — #undo-btn, #stats-btn, #settings-toggle-btn,
-     #restart-btn and #rules-toggle live inside these and are still reached
-     directly by id from the under-board buttons below. */
-  #controls, #timers-panel, #captured-panel{ display:none; }
+  /* #timers-panel/#captured-panel duplicate the per-color corner bars
+     around the board, so they're hidden rather than deleted from the HTML
+     — #undo-btn, #stats-btn, #settings-toggle-btn and #rules-toggle live
+     inside/alongside these and are still reached directly by id from the
+     under-board buttons and the top Правила button. */
+  #timers-panel, #captured-panel{ display:none; }
   #under-board-controls{
     display:flex; flex-wrap:wrap; gap:6px; justify-content:center;
     margin-top:10px; width:100%;
@@ -1357,12 +1356,16 @@
       </div>
 
       <div class="sidebar-col" id="sidebar-col-2">
-      <div id="controls">
-        <button class="btn" id="restart-btn">Новая партия</button>
-        <button class="btn secondary" id="rules-toggle">Правила</button>
-        <button class="btn secondary" id="stats-btn">📊 Статистика</button>
-        <button class="btn secondary" id="settings-toggle-btn">⚙️ Настройки</button>
-      </div>
+      <!-- rules-toggle, stats-btn, settings-toggle-btn stay in the page —
+           just not inside any visible menu block — because the top Правила
+           button and the under-board Статистика/Настройки buttons still
+           reach them by id and .click() them directly. restart-btn (and the
+           #controls wrapper that used to group all four) is gone for real:
+           nothing calls it anymore now that Новая партия triggers newGame()
+           directly. -->
+      <button class="btn secondary" id="rules-toggle" style="display:none;">Правила</button>
+      <button class="btn secondary" id="stats-btn" style="display:none;">📊 Статистика</button>
+      <button class="btn secondary" id="settings-toggle-btn" style="display:none;">⚙️ Настройки</button>
 
       <div id="captured-panel">
         <div class="panel-header" id="captured-title">💀 Взятые фигуры</div>
@@ -2713,7 +2716,6 @@
     setText('rules-close-btn', t('statsCloseBtn'));
     renderRulesBody();
 
-    setText('restart-btn', t('newGameBtn'));
     setText('overlay-restart', t('newGameBtn'));
     setText('overlay-decline-rematch', t('rematchDeclineBtn'));
     setText('reinvite-btn', t('reinviteBtn'));
@@ -7804,13 +7806,6 @@
     advanceTurnAndContinue();
   }
 
-  document.getElementById('restart-btn').addEventListener('click', ()=>{
-    if(onlineRoomId){
-      appendChatMessage(t('systemLabel'), t('cantRestartOnline'), true);
-      return;
-    }
-    newGame();
-  });
   document.getElementById('overlay-restart').addEventListener('click', async ()=>{
     if(onlineRoomId){
       const snap = await fbDb.ref(rematchPath()).once('value');
@@ -8258,7 +8253,7 @@
   }
 
   const ALL_DRAGGABLE_PANEL_IDS = [
-    'local-players-panel','record-panel','controls','captured-panel','history-panel',
+    'local-players-panel','record-panel','captured-panel','history-panel',
     'chat-panel','timers-panel','online-panel'
   ];
   function initDraggablePanels(){
@@ -8273,7 +8268,7 @@
   // height" between left and right the way flex-wrap pairing or CSS grid
   // rows would force, which is what used to leave a gap under any panel
   // shorter than whatever ended up next to it.
-  const MOBILE_COL_LEFT_ORDER = ['controls', 'chat-panel', 'timers-panel', 'local-players-panel'];
+  const MOBILE_COL_LEFT_ORDER = ['chat-panel', 'timers-panel', 'local-players-panel'];
   const MOBILE_COL_RIGHT_ORDER = ['online-panel', 'captured-panel', 'record-panel', 'history-panel'];
   const MOBILE_TABLET_MAX_WIDTH = 1023;
   const desktopPanelHomes = {};
