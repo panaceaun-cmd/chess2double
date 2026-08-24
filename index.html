@@ -67,7 +67,7 @@
     --piece-stroke-w-black: .6px; --piece-stroke-color-black: #000;
     --piece-stroke-w-yellow: .6px; --piece-stroke-color-yellow: #000;
     --piece-stroke-w-grey: .6px; --piece-stroke-color-grey: #000;
-    --coord-size: clamp(10px, calc(var(--sq) * .45), 30px);
+    --coord-size: clamp(10px, calc(var(--sq) * .45), 46px);
   }
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0; max-width:100%; overflow-x:hidden;}
@@ -405,11 +405,11 @@
   #board-wrap{
     max-width:100%;
     overflow-x:auto;
-    padding:clamp(6px, calc(var(--sq) * .35), 20px);
-    padding-top:calc(clamp(6px, calc(var(--sq) * .35), 20px) + 40px);
+    padding:clamp(6px, calc(var(--sq) * .35), 36px);
+    padding-top:calc(clamp(6px, calc(var(--sq) * .35), 36px) + 40px);
     background:linear-gradient(160deg,#1c130d,#0f0906);
     border-radius:14px;
-    border:clamp(1px, calc(var(--sq) * .05), 3px) solid var(--brass-dim);
+    border:clamp(1px, calc(var(--sq) * .05), 6px) solid var(--brass-dim);
     box-shadow:0 12px 34px rgba(0,0,0,.55), inset 0 0 30px rgba(0,0,0,.5);
     position:relative;
     display:flex;
@@ -470,7 +470,7 @@
     direction:ltr;
     grid-template-columns: var(--coord-size) repeat(16, var(--sq)) var(--coord-size);
     grid-template-rows: var(--coord-size) repeat(8, var(--sq)) var(--coord-size);
-    border:clamp(2px, calc(var(--sq) * .08), 5px) solid var(--brass);
+    border:clamp(2px, calc(var(--sq) * .08), 9px) solid var(--brass);
     border-radius:4px;
     overflow:hidden;
     box-shadow:0 0 0 1px #000;
@@ -2199,13 +2199,41 @@
   });
 
   // ---- board size slider ----
+  // Finds the largest --sq that keeps #board-wrap's actual rendered width
+  // within the space really available, via real measurement (binary
+  // search) rather than an approximate formula — this accounts for every
+  // clamp()'d property automatically, including ones added later. This is
+  // what actually fixes "the board doesn't fit / needs scrolling to see
+  // it all": no amount of making the frame itself scale proportionally
+  // helps if the board underneath is simply wider than the screen.
+  function maxFittingBoardSize(){
+    const container = document.getElementById('main-col');
+    const wrap = document.getElementById('board-wrap');
+    if(!container || !wrap) return 100;
+    const available = container.clientWidth || window.innerWidth || 380;
+    const prevSq = document.documentElement.style.getPropertyValue('--sq');
+    let lo = 10, hi = 100, best = 10;
+    while(lo <= hi){
+      const mid = Math.floor((lo + hi) / 2);
+      document.documentElement.style.setProperty('--sq', mid + 'px');
+      if(wrap.scrollWidth <= available){ best = mid; lo = mid + 1; }
+      else { hi = mid - 1; }
+    }
+    document.documentElement.style.setProperty('--sq', prevSq);
+    return best;
+  }
   function applyBoardSize(px, save){
+    const maxFit = maxFittingBoardSize();
+    px = Math.min(px, maxFit);
     boardSizePx = px;
     document.documentElement.style.setProperty('--sq', px + 'px');
     const label = document.getElementById('board-size-value');
     if(label) label.textContent = px + 'px';
     const range = document.getElementById('board-size-range');
-    if(range && parseInt(range.value) !== px) range.value = px;
+    if(range){
+      range.max = String(maxFit);
+      if(parseInt(range.value) !== px) range.value = px;
+    }
     if(save){ try{ localStorage.setItem('chess2-boardsize', String(px)); }catch(e){} }
   }
   function autoDetectBoardSize(){
@@ -7902,6 +7930,11 @@
   }
 
   window.addEventListener('resize', render);
+  let boardSizeResizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(boardSizeResizeTimer);
+    boardSizeResizeTimer = setTimeout(() => applyBoardSize(boardSizePx, false), 150);
+  });
 
   // When the tab/browser actually closes, make sure no trace of an active
   // call or file transfer is left behind on the server — pagehide fires
