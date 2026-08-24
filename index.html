@@ -456,8 +456,14 @@
   .corner-bar-timer:hover{ border-color:var(--brass-dim); background:rgba(0,0,0,.25); }
   .corner-bar-timer.low{ color:#e08a6a; }
   .corner-bar-captured{
-    display:flex; flex-wrap:wrap; gap:2px; min-height:16px;
+    display:flex; flex-wrap:wrap; gap:1px; min-height:8px;
     font-size:13px; line-height:1;
+  }
+  .corner-bar-captured .cap-icon{
+    font-size:6.5px; line-height:1;
+    display:inline-flex; align-items:center; justify-content:center;
+    width:10px; height:10px; border-radius:2px;
+    background:rgba(40,28,16,.22);
   }
   @media (max-width:600px){
     .corner-bar-nick{ font-size:10.5px; }
@@ -2251,7 +2257,13 @@
   (function initBoardSize(){
     let saved = null;
     try{ saved = localStorage.getItem('chess2-boardsize'); }catch(e){}
-    const px = saved ? parseInt(saved) : Math.min(43, autoDetectBoardSize());
+    // maxFittingBoardSize() measures the real available space and was
+    // built for exactly this — the old Math.min(43, ...) cap here predates
+    // the page container being widened and was the last leftover reason a
+    // new visitor's board defaulted small with empty space around it on a
+    // wide desktop screen, even though nothing was actually stopping it
+    // from being bigger.
+    const px = saved ? parseInt(saved) : maxFittingBoardSize();
     applyBoardSize(px, !saved);
   })();
 
