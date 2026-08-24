@@ -2223,20 +2223,21 @@
   }
   function maxFittingBoardSize(){
     const vw = window.innerWidth || 380;
-    let bodyPadding, available;
+    let bodyPadding;
     if(vw > 1023){
-      // desktop: main-col shares #top-row with the fixed 400px right-panels
-      // column (see #right-panels{flex:0 0 400px}) plus its 18px gap
       bodyPadding = 24; // body{ padding:0 12px 40px } -> 12px each side
-      available = vw - bodyPadding - 400 - 18;
     } else if(vw > 420){
       bodyPadding = 44; // body{ padding-left/right:22px } in the tablet/phone tier
-      available = vw - bodyPadding;
     } else {
       bodyPadding = 32; // body{ padding:0 16px 32px } on the smallest phones
-      available = vw - bodyPadding;
     }
-    available = Math.max(160, available);
+    // #top-row already has flex-wrap:wrap — when the board needs more room
+    // than fits alongside the fixed 400px right-panels column, that column
+    // simply wraps onto its own line below the board instead of squeezing
+    // it. So the board's own ceiling is the full viewport width, not
+    // "viewport minus the sidebar" — reserving space for the sidebar here
+    // was capping the board even in cases the layout already handles fine.
+    const available = Math.max(160, vw - bodyPadding);
     let best = 10;
     for(let sq = 10; sq <= 160; sq++){
       if(widthForBoardSq(sq) <= available) best = sq; else break;
