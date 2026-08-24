@@ -2308,7 +2308,55 @@
       if(parseInt(range.value) !== px) range.value = px;
     }
     if(save){ try{ localStorage.setItem('chess2-boardsize', String(px)); }catch(e){} }
+    // Sync the corner-bar rows to the board's own actual width — without
+    // this, their own content (a long nickname, a full row of captured-
+    // piece icons) can need more room than a small board does, and since
+    // #board-wrap centers its children rather than clipping them, THAT
+    // becomes the widest thing in the column and the whole frame stops
+    // shrinking even though the board itself did.
+    const boardEl = document.getElementById('board');
+    if(boardEl){
+      const boardWidth = boardEl.getBoundingClientRect().width;
+      if(boardWidth > 0){
+        ['corner-bars-top', 'corner-bars-bottom'].forEach(id => {
+          const row = document.getElementById(id);
+          if(row) row.style.width = boardWidth + 'px';
+        });
+      }
+    }
   }
+  // ---- pinch-to-zoom on touch devices — grows/shrinks the board the same
+  // way dragging the size slider does, reusing applyBoardSize so the fit-
+  // to-screen clamping and corner-bar width sync above both still apply ----
+  (function initPinchZoomBoardSize(){
+    const target = document.getElementById('board-wrap');
+    if(!target) return;
+    function touchDist(touches){
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      return Math.hypot(dx, dy);
+    }
+    let pinchStartDist = null, pinchStartSize = null;
+    target.addEventListener('touchstart', (e) => {
+      if(e.touches.length === 2){
+        pinchStartDist = touchDist(e.touches);
+        pinchStartSize = boardSizePx;
+      }
+    }, {passive:true});
+    target.addEventListener('touchmove', (e) => {
+      if(e.touches.length === 2 && pinchStartDist){
+        e.preventDefault(); // stop the browser's own page-zoom from fighting this
+        const scale = touchDist(e.touches) / pinchStartDist;
+        const newSize = Math.max(10, Math.round(pinchStartSize * scale));
+        applyBoardSize(newSize, true);
+      }
+    }, {passive:false});
+    function endPinch(e){
+      if(e.touches.length < 2){ pinchStartDist = null; pinchStartSize = null; }
+    }
+    target.addEventListener('touchend', endPinch, {passive:true});
+    target.addEventListener('touchcancel', endPinch, {passive:true});
+  })();
   function autoDetectBoardSize(){
     const w = window.innerWidth || 380;
     // work backwards from the width actually available for the board itself:
@@ -8433,9 +8481,9 @@
   // "open") — together they're the two ways to actually start a game
   // (local setup, or the online lobby with quick-match/friends), so hiding
   // either by default would bury a new player's entry point behind an
-  // unlabeled button. The other three don't gate anything a new player
-  // needs, so they're safe to start collapsed.
-  ['local-players-panel', 'online-panel'].forEach(id => {
+  // unlabeled button. Chat and history are included here too now, per the
+  // requested default arrangement — all four panels visible right away.
+  ['local-players-panel', 'online-panel', 'chat-panel', 'history-panel'].forEach(id => {
     if(!(id in ubcPanelState)) ubcPanelState[id] = true;
   });
 
