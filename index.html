@@ -2205,27 +2205,42 @@
   });
 
   // ---- board size slider ----
-  // Finds the largest --sq that keeps #board-wrap's actual rendered width
-  // within the space really available, via real measurement (binary
-  // search) rather than an approximate formula — this accounts for every
-  // clamp()'d property automatically, including ones added later. This is
-  // what actually fixes "the board doesn't fit / needs scrolling to see
-  // it all": no amount of making the frame itself scale proportionally
-  // helps if the board underneath is simply wider than the screen.
+  // Computes the largest --sq that keeps the board within the space really
+  // available, directly from window.innerWidth and the layout's own known
+  // constants — not by measuring a flex child's clientWidth. An earlier
+  // version measured #main-col directly, which in principle should track
+  // real layout automatically, but in practice under-reported the
+  // available space (capping out around ~46px where much more room was
+  // actually free) — most likely a timing issue, since this runs at
+  // initial page load before the flex layout has necessarily settled.
+  // Computing it from window.innerWidth plus the fixed sizes already used
+  // elsewhere in this stylesheet sidesteps that entirely.
+  function widthForBoardSq(sq){
+    const coord = Math.max(10, Math.min(sq * .45, 46));
+    const pad = Math.max(6, Math.min(sq * .35, 36));
+    const wrapBorder = Math.max(1, Math.min(sq * .05, 6));
+    return 2 * (coord + pad + wrapBorder) + sq * 16;
+  }
   function maxFittingBoardSize(){
-    const container = document.getElementById('main-col');
-    const wrap = document.getElementById('board-wrap');
-    if(!container || !wrap) return 100;
-    const available = container.clientWidth || window.innerWidth || 380;
-    const prevSq = document.documentElement.style.getPropertyValue('--sq');
-    let lo = 10, hi = 160, best = 10;
-    while(lo <= hi){
-      const mid = Math.floor((lo + hi) / 2);
-      document.documentElement.style.setProperty('--sq', mid + 'px');
-      if(wrap.scrollWidth <= available){ best = mid; lo = mid + 1; }
-      else { hi = mid - 1; }
+    const vw = window.innerWidth || 380;
+    let bodyPadding, available;
+    if(vw > 1023){
+      // desktop: main-col shares #top-row with the fixed 400px right-panels
+      // column (see #right-panels{flex:0 0 400px}) plus its 18px gap
+      bodyPadding = 24; // body{ padding:0 12px 40px } -> 12px each side
+      available = vw - bodyPadding - 400 - 18;
+    } else if(vw > 420){
+      bodyPadding = 44; // body{ padding-left/right:22px } in the tablet/phone tier
+      available = vw - bodyPadding;
+    } else {
+      bodyPadding = 32; // body{ padding:0 16px 32px } on the smallest phones
+      available = vw - bodyPadding;
     }
-    document.documentElement.style.setProperty('--sq', prevSq);
+    available = Math.max(160, available);
+    let best = 10;
+    for(let sq = 10; sq <= 160; sq++){
+      if(widthForBoardSq(sq) <= available) best = sq; else break;
+    }
     return best;
   }
   function applyBoardSize(px, save){
