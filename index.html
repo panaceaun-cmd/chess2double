@@ -6818,6 +6818,43 @@
     return [];
   }
 
+  // Checks whether moving a piece from (fromR,fromC) to (toR,toC) would
+  // leave it capturable by an opponent on their very next move — used to
+  // stop a king from walking into a square where it would be taken right
+  // away. Simulates the move on the real board array, checks, then puts
+  // everything straight back exactly as it was.
+  function wouldSquareBeAttackedAfterMove(color, fromR, fromC, toR, toC){
+    const team = OWNER[color];
+    const movingPiece = board[fromR][fromC];
+    const capturedPiece = board[toR][toC];
+    board[fromR][fromC] = null;
+    board[toR][toC] = movingPiece;
+    let attacked = false;
+    for(let r=0; r<ROWS && !attacked; r++){
+      for(let c=0; c<COLS && !attacked; c++){
+        const p = board[r][c];
+        if(!p || p === movingPiece || OWNER[p.color] === team) continue;
+        const moves = rawMoves(r,c);
+        for(const mv of moves){
+          if(mv.r === toR && mv.c === toC){ attacked = true; break; }
+        }
+      }
+    }
+    board[fromR][fromC] = movingPiece;
+    board[toR][toC] = capturedPiece;
+    return attacked;
+  }
+
+  // Same as rawMoves, but for a king specifically also drops any square
+  // that would leave it capturable right away — a king simply can't move
+  // there, the same way it can't in standard chess.
+  function computeLegalMoves(r,c){
+    const p = board[r][c];
+    const moves = rawMoves(r,c);
+    if(!p || p.type !== 'K') return moves;
+    return moves.filter(mv => !wouldSquareBeAttackedAfterMove(p.color, r, c, mv.r, mv.c));
+  }
+
   function doMove(from, move){
     const piece = board[from.r][from.c];
     let captured = board[move.r][move.c];
@@ -6875,7 +6912,7 @@
       for(let c=0;c<COLS;c++){
         const p = board[r][c];
         if(p && p.color === color){
-          const mv = rawMoves(r,c);
+          const mv = computeLegalMoves(r,c);
           for(const m of mv) moves.push({from:{r,c}, move:m});
         }
       }
@@ -7286,7 +7323,7 @@
       // click elsewhere: reselect or clear
       if(clickedPiece && clickedPiece.color===turn){
         selected = {r,c};
-        legalMoves = rawMoves(r,c);
+        legalMoves = computeLegalMoves(r,c);
       } else {
         selected = null; legalMoves = [];
       }
@@ -7296,7 +7333,7 @@
 
     if(clickedPiece && clickedPiece.color===turn){
       selected = {r,c};
-      legalMoves = rawMoves(r,c);
+      legalMoves = computeLegalMoves(r,c);
       render();
     }
   }
