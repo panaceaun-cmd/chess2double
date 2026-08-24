@@ -89,7 +89,7 @@
   }
   #brand-logo{height:96px; width:auto; flex:0 0 auto; filter:drop-shadow(0 2px 6px rgba(0,0,0,.5));}
   #top-brand-row{
-    width:100%; max-width:2200px;
+    width:100%; max-width:none;
     display:flex; align-items:center; flex-wrap:wrap;
     gap:14px; margin:6px 0 10px;
   }
@@ -110,7 +110,7 @@
 
   /* two-column app layout */
   #app-grid{
-    width:100%; max-width:2200px;
+    width:100%; max-width:none;
     display:flex; flex-direction:column; gap:8px; align-items:stretch;
   }
   #top-row{
@@ -1569,7 +1569,7 @@
             <span id="board-size-label">📐 Размер доски</span>
             <span id="board-size-value">32px</span>
           </div>
-          <input type="range" id="board-size-range" min="10" max="100" step="1" value="32">
+          <input type="range" id="board-size-range" min="10" max="160" step="1" value="32">
         </div>
 
         <div class="settings-row">
@@ -2212,7 +2212,7 @@
     if(!container || !wrap) return 100;
     const available = container.clientWidth || window.innerWidth || 380;
     const prevSq = document.documentElement.style.getPropertyValue('--sq');
-    let lo = 10, hi = 100, best = 10;
+    let lo = 10, hi = 160, best = 10;
     while(lo <= hi){
       const mid = Math.floor((lo + hi) / 2);
       document.documentElement.style.setProperty('--sq', mid + 'px');
