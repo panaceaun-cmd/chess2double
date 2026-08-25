@@ -3140,8 +3140,10 @@
       inner.innerHTML = '<a href="' + sp.link + '" target="_blank" rel="noopener sponsored"><img src="' +
         sp.image + '" alt="' + escapeHtml(sp.label || '') + '"></a>';
     } else {
-      inner.innerHTML = '<div class="ad-splash-mini"><span>' + escapeHtml(AD_SPLASH_TEXT[currentLang] || AD_SPLASH_TEXT.ru) + '</span></div>';
-      inner.querySelector('.ad-splash-mini').addEventListener('click', showSplash);
+      // no real ad source configured (no AdSense, no sponsors) — hide the
+      // slot rather than filling it with the promotional splash text, so
+      // it doesn't sit there taking up space until a real ad is set up
+      el.style.display = 'none';
     }
   }
   function refreshAdSlots(){
@@ -6572,10 +6574,36 @@
     if(isBotSeat(n)) return '🤖 ' + t('botTag') + ' ' + botLevel[n];
     return localPlayerName(n) || playerLabel(n);
   }
+  // Shared with render()'s own flip180 determination below — corner bars
+  // need the exact same answer, or they'd show the wrong player's info in
+  // each corner whenever the board is actually flipped (online: each
+  // player sees their own pieces near them; offline orientationMode 4:
+  // auto-flips to face whoever's turn it currently is).
+  function isBoardCurrentlyFlipped(){
+    return onlineRoomId ? shouldFlipForOnlineViewer() : (orientationMode===4 && OWNER[turn]==='p2');
+  }
   function renderCornerBars(){
-    ['b','g','w','y'].forEach(c => {
-      const bar = document.getElementById('corner-bar-' + c);
+    // Unflipped, a color's corner is (home-side, home-half): black is
+    // top+left, grey is top+right, white is bottom+left, yellow is
+    // bottom+right (matching the starting position's files A-H/I-P and
+    // COLOR_HOME_SIDE). A 180° flip swaps both axes at once, so the color
+    // actually shown in each of the 4 fixed DOM slots depends on whether
+    // the board is currently flipped — without this, the labels stay
+    // fixed to their original corner while the pieces visually rotate
+    // underneath them, so nick/timer/captured end up next to the wrong
+    // color's pieces exactly like the screenshot showed.
+    const flipped = isBoardCurrentlyFlipped();
+    const slotColor = {
+      'corner-bar-b': flipped ? 'y' : 'b',
+      'corner-bar-g': flipped ? 'w' : 'g',
+      'corner-bar-w': flipped ? 'g' : 'w',
+      'corner-bar-y': flipped ? 'b' : 'y'
+    };
+    Object.keys(slotColor).forEach(slotId => {
+      const bar = document.getElementById(slotId);
       if(!bar) return;
+      const c = slotColor[slotId];
+      bar.dataset.color = c;
       const active = (c === turn && !gameOver);
       bar.classList.toggle('active-turn', active);
       const low = (timers[c] || 0) <= 60;
@@ -7433,7 +7461,7 @@
     // regardless of which of the 4 colors they currently control — this
     // overrides the local orientationMode setting, which only makes sense
     // for offline hotseat play where everyone shares one screen.
-    const flipBoard = onlineRoomId ? shouldFlipForOnlineViewer() : (orientationMode===4 && OWNER[turn]==='p2');
+    const flipBoard = isBoardCurrentlyFlipped();
     boardEl.classList.toggle('flip180', flipBoard);
     const FILES = 'ABCDEFGHIJKLMNOP';
 
