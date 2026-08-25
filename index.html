@@ -7690,8 +7690,18 @@
         const toPieceEl = toSq ? toSq.querySelector('.piece') : null;
         if(toPieceEl){
           const toRect = toPieceEl.getBoundingClientRect();
-          const dx = animateFromRect.left - toRect.left;
-          const dy = animateFromRect.top - toRect.top;
+          let dx = animateFromRect.left - toRect.left;
+          let dy = animateFromRect.top - toRect.top;
+          // The piece lives inside #board, which is itself rotated 180°
+          // (.flip180) when the board is flipped for this viewer. dx/dy
+          // above are real screen-space deltas (getBoundingClientRect
+          // already accounts for the rotation), but a transform applied to
+          // a CHILD of a rotated element is interpreted within that
+          // parent's own (rotated) coordinate space — so the same offset
+          // gets rotated a second time, inverting both axes. Negating here
+          // cancels that out, since a 180° rotation is exactly "flip both
+          // axes".
+          if(isBoardCurrentlyFlipped()){ dx = -dx; dy = -dy; }
           if(dx !== 0 || dy !== 0){
             const distSquares = Math.hypot(lastMove.to.r - lastMove.from.r, lastMove.to.c - lastMove.from.c);
             const durationMs = Math.max(80, (distSquares / 2) * 1000); // 2 squares/second
