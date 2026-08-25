@@ -7615,7 +7615,7 @@
     // square afterward, at 2 squares/second. See lastAnimatedMoveRef above
     // for why lastMove is compared by reference here.
     let animateFromRect = null;
-    let capturedPieceRect = null;
+    let capturedGhostEl = null;
     const isNewMove = !!(lastMove && lastMove !== lastAnimatedMoveRef);
     if(isNewMove){
       const fromSq = boardEl.querySelector('.sq[data-r="' + lastMove.from.r + '"][data-c="' + lastMove.from.c + '"]');
@@ -7629,7 +7629,21 @@
         const capturedPieceEl = toSqBefore ? toSqBefore.querySelector('.piece') : null;
         if(capturedPieceEl){
           const rect = capturedPieceEl.getBoundingClientRect();
-          if(rect.width > 0 && rect.height > 0) capturedPieceRect = rect;
+          if(rect.width > 0 && rect.height > 0){
+            capturedGhostEl = spawnStandingCapturedGhost(rect, lastMove);
+            // Safety net: whatever happens to the attacker's own animation
+            // downstream (its old position couldn't be captured, its new
+            // element wasn't found, etc.), this guarantees the ghost's
+            // fall eventually triggers rather than being stuck standing
+            // forever. Real capture-kick calls elsewhere mark the element
+            // via dataset.fallTriggered first, making this a no-op then.
+            const thisGhost = capturedGhostEl;
+            setTimeout(() => {
+              if(thisGhost.parentNode && !thisGhost.dataset.fallTriggered){
+                triggerCaptureKickFall(null, thisGhost, lastMove);
+              }
+            }, 10000);
+          }
         }
       }
     }
@@ -7765,30 +7779,28 @@
               toPieceEl.style.transform = '';
               toPieceEl.style.position = '';
               toPieceEl.style.zIndex = '';
-              if(lastMove.capture && capturedPieceRect){
-                playCaptureKickAnimation(toPieceEl, capturedPieceRect, lastMove);
+              if(lastMove.capture && capturedGhostEl){
+                triggerCaptureKickFall(toPieceEl, capturedGhostEl, lastMove);
               }
             }, {once:true});
+          } else if(lastMove.capture && capturedGhostEl){
+            // attacker had nothing to visually travel — trigger the fall
+            // immediately instead of leaving the ghost standing forever
+            triggerCaptureKickFall(toPieceEl, capturedGhostEl, lastMove);
           }
         }
       }
     }
   }
 
-  // Brief "kick" flourish when a capture lands: the attacker gets a quick
-  // impact bounce, and a temporary ghost of the captured piece (rendered
-  // with its own real glyph/color) flies off and fades from right where it
-  // stood. The ghost is position:fixed and appended to <body>, so — unlike
-  // the pieces still on the board — it's completely outside #board's own
-  // rotation and needs no flip compensation of its own.
-  function playCaptureKickAnimation(attackerEl, capturedRect, move){
-    attackerEl.classList.remove('piece-kick-impact');
-    void attackerEl.offsetWidth; // restart the animation if it's already mid-play from a rapid prior capture
-    attackerEl.classList.add('piece-kick-impact');
-    attackerEl.addEventListener('animationend', () => {
-      attackerEl.classList.remove('piece-kick-impact');
-    }, {once:true});
-
+  // Spawns the captured-piece ghost immediately after the rebuild, standing
+  // still exactly where the real piece was, with no fall animation yet —
+  // this is what keeps the captured square looking occupied for the whole
+  // time the attacker is still traveling toward it, instead of the target
+  // vanishing the instant the board data updates while the attacker is
+  // still visually en route. Returns the element so the fall can be
+  // triggered on it later, at the actual moment of impact.
+  function spawnStandingCapturedGhost(capturedRect, move){
     const ghost = document.createElement('span');
     ghost.className = 'piece captured-piece-ghost ' + CSSCOLOR[move.capturedColor];
     ghost.textContent = GLYPH[move.capturedColor][move.capturedType];
@@ -7796,7 +7808,25 @@
     ghost.style.top = capturedRect.top + 'px';
     ghost.style.width = capturedRect.width + 'px';
     ghost.style.height = capturedRect.height + 'px';
-    ghost.style.fontSize = getComputedStyle(attackerEl).fontSize;
+    ghost.style.fontSize = capturedRect.height + 'px';
+    ghost.style.animation = 'none'; // standing still — no fall yet
+    document.body.appendChild(ghost);
+    return ghost;
+  }
+  // Called at the moment the attacker actually arrives — gives it a quick
+  // impact bounce, and starts the already-standing ghost falling away and
+  // fading from right where it's been waiting.
+  function triggerCaptureKickFall(attackerEl, ghost, move){
+    ghost.dataset.fallTriggered = '1';
+    if(attackerEl){
+      attackerEl.classList.remove('piece-kick-impact');
+      void attackerEl.offsetWidth; // restart the animation if it's already mid-play from a rapid prior capture
+      attackerEl.classList.add('piece-kick-impact');
+      attackerEl.addEventListener('animationend', () => {
+        attackerEl.classList.remove('piece-kick-impact');
+      }, {once:true});
+    }
+
     // fall away continuing roughly the same direction the attacker came
     // from, so it visually reads as "knocked" rather than falling randomly
     const dr = move.to.r - move.from.r, dc = move.to.c - move.from.c;
@@ -7805,7 +7835,7 @@
     const fallRot = (dc >= 0 ? 1 : -1) * (95 + Math.random()*30);
     ghost.style.setProperty('--fall-x', fallX + 'px');
     ghost.style.setProperty('--fall-rot', fallRot + 'deg');
-    document.body.appendChild(ghost);
+    ghost.style.animation = ''; // let the CSS class's animation take over now
     ghost.addEventListener('animationend', () => { ghost.remove(); }, {once:true});
     // safety net in case animationend never fires for some reason (e.g. the
     // element got hidden mid-flight) — don't leave a stray node behind
