@@ -1397,6 +1397,36 @@
       </div>
       </div>
 
+      <div class="sidebar-col" id="sidebar-col-2">
+      <div id="online-panel">
+        <div class="online-header">
+          <span id="online-lobby-title">🌐 Игра онлайн</span>
+        </div>
+
+        <div id="online-game-bar"></div>
+        <button id="reinvite-btn" type="button" style="display:none;">🔄 Пригласить снова</button>
+
+        <div class="online-actions">
+          <button class="btn" id="quick-match-btn">🎲 Быстрая игра (случайный соперник)</button>
+          <button class="btn secondary" id="cancel-queue-btn" style="display:none;">Отменить поиск</button>
+          <button class="btn secondary" id="friends-toggle-btn">👥 Друзья</button>
+        </div>
+
+        <div class="online-status" id="online-status"></div>
+        <div class="online-players-label" id="online-players-label">Игроки онлайн — нажмите, чтобы пригласить</div>
+        <div class="online-players-list" id="online-players-list"><div class="no-players">Поиск игроков…</div></div>
+
+        <div class="online-header" style="margin-top:14px;">
+          <span id="lobby-chat-title">💬 Общий чат (лобби)</span>
+        </div>
+        <div class="lobby-chat-log" id="lobby-chat-log"></div>
+        <form class="lobby-chat-form" id="lobby-chat-form">
+          <input id="lobby-chat-input" type="text" placeholder="Написать в общий чат, найти соперника..." autocomplete="off">
+          <button type="submit" class="btn">Отправить</button>
+        </form>
+      </div>
+      </div>
+
       <div class="sidebar-col" id="sidebar-col-3">
       <div id="chat-panel">
         <div class="chat-header">
@@ -1487,35 +1517,6 @@
 
       </main>
 
-    <aside id="right-panels">
-      <div id="online-panel">
-        <div class="online-header">
-          <span id="online-lobby-title">🌐 Игра онлайн</span>
-        </div>
-
-        <div id="online-game-bar"></div>
-        <button id="reinvite-btn" type="button" style="display:none;">🔄 Пригласить снова</button>
-
-        <div class="online-actions">
-          <button class="btn" id="quick-match-btn">🎲 Быстрая игра (случайный соперник)</button>
-          <button class="btn secondary" id="cancel-queue-btn" style="display:none;">Отменить поиск</button>
-          <button class="btn secondary" id="friends-toggle-btn">👥 Друзья</button>
-        </div>
-
-        <div class="online-status" id="online-status"></div>
-        <div class="online-players-label" id="online-players-label">Игроки онлайн — нажмите, чтобы пригласить</div>
-        <div class="online-players-list" id="online-players-list"><div class="no-players">Поиск игроков…</div></div>
-
-        <div class="online-header" style="margin-top:14px;">
-          <span id="lobby-chat-title">💬 Общий чат (лобби)</span>
-        </div>
-        <div class="lobby-chat-log" id="lobby-chat-log"></div>
-        <form class="lobby-chat-form" id="lobby-chat-form">
-          <input id="lobby-chat-input" type="text" placeholder="Написать в общий чат, найти соперника..." autocomplete="off">
-          <button type="submit" class="btn">Отправить</button>
-        </form>
-      </div>
-    </aside>
     </div>
     <div id="mobile-panels-row">
       <div id="mobile-col-left" class="mobile-col"></div>
