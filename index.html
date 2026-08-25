@@ -3314,9 +3314,29 @@
       startDirectCallListener();
       armDirectCallDisconnectCleanup();
       offerResumeIfInterrupted();
+      startGlobalReconnectWatcher();
       if(inviteTimer) clearInterval(inviteTimer);
       inviteTimer = setInterval(pollMyInvite, 3000);
     }
+  }
+  // Runs for the whole session regardless of whether the player is
+  // currently seated in a room — startConnectionWatcher below only runs
+  // WHILE already in a room, which is exactly backwards for this: someone
+  // whose connection dropped mid-game may no longer be "in" the room from
+  // the client's own perspective by the time they reconnect, so the
+  // resume-offer needs its own watcher that's active independent of that.
+  let globalReconnectWatcherRef = null;
+  function startGlobalReconnectWatcher(){
+    if(globalReconnectWatcherRef || !fbDb) return;
+    globalReconnectWatcherRef = fbDb.ref('.info/connected');
+    let wasConnected = null;
+    globalReconnectWatcherRef.on('value', (snap) => {
+      const connected = snap.val() === true;
+      if(connected && wasConnected === false && !onlineRoomId){
+        offerResumeIfInterrupted();
+      }
+      wasConnected = connected;
+    });
   }
 
   // If this player's connection dropped mid-game, they don't have to wait
@@ -4441,7 +4461,7 @@
     const beat = ()=>{ if(onlineRoomId) storeSet('room-presence:' + onlineRoomId + ':' + myNick, JSON.stringify({ts:Date.now()}), true); };
     beat();
     roomPresenceInterval = setInterval(beat, 15000);
-    opponentCheckInterval = setInterval(checkOpponentPresence, 3000);
+    opponentCheckInterval = setInterval(checkOpponentPresence, 1500);
   }
   function stopRoomPresence(){
     if(roomPresenceInterval) clearInterval(roomPresenceInterval);
@@ -4515,7 +4535,13 @@
       const raw = await storeGet('room-presence:' + onlineRoomId + ':' + onlineOpponent, true);
       if(!raw) return;
       let data; try{ data = JSON.parse(raw); }catch(e){ return; }
-      const staleFor = Date.now() - data.ts;
+      // the onDisconnect-set flag is a direct, server-confirmed signal —
+      // trust it immediately rather than folding it into the ts-based
+      // staleness math below, since that ts reflects when the hook was
+      // registered (often much earlier), not when the disconnect actually
+      // happened, which would otherwise make a fresh disconnect look
+      // artificially "not stale yet" or artificially "very stale".
+      const staleFor = data.disconnected ? Infinity : (Date.now() - data.ts);
       if(staleFor <= 45000){
         if(opponentReconnectingSince){ opponentReconnectingSince = null; hideOpponentReconnectingBanner(); hideDisconnectNotice(); }
         return;
@@ -4560,7 +4586,7 @@
       const raw = await storeGet('room-presence:' + onlineRoomId + ':' + nick, true);
       if(!raw) continue;
       let data; try{ data = JSON.parse(raw); }catch(e){ continue; }
-      const staleFor = Date.now() - data.ts;
+      const staleFor = data.disconnected ? Infinity : (Date.now() - data.ts);
       if(staleFor <= 45000){
         if(seatReconnectingSince[seat]){ delete seatReconnectingSince[seat]; hideOpponentReconnectingBanner(); hideDisconnectNotice(); }
         continue;
@@ -4948,6 +4974,15 @@
             }
           }catch(e){}
         });
+      }
+      // re-register the onDisconnect hook every time a connection is
+      // (re)established — Firebase clears these on each disconnect, so
+      // this must run again on every reconnect, not just once
+      if(connected && onlineRoomId && myNick){
+        try{
+          fbDb.ref(fbPath('room-presence:' + onlineRoomId + ':' + myNick))
+            .onDisconnect().set(JSON.stringify({disconnected:true, ts:Date.now()}));
+        }catch(e){}
       }
     });
   }
