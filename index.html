@@ -1181,7 +1181,7 @@
   #landscape-prompt-overlay{
     display:none;
     position:fixed; inset:0; z-index:200;
-    background:rgba(10,6,3,.97);
+    background:#0a0603;
     align-items:center; justify-content:center;
     text-align:center; padding:24px;
   }
@@ -8241,6 +8241,17 @@
   window.addEventListener('resize', () => {
     clearTimeout(boardSizeResizeTimer);
     boardSizeResizeTimer = setTimeout(() => applyBoardSize(boardSizePx, false), 150);
+  });
+  // Rotating a phone is its own event, not just a resize — some mobile
+  // browsers fire 'resize' with stale/intermediate width/height mid-
+  // rotation, before the browser chrome has finished settling into the
+  // new orientation, so a single quick recalculation can end up computing
+  // the board size against the OLD dimensions and get stuck small. This
+  // recalculates twice — once shortly after, and again a bit later as a
+  // safety net — so it lands on the real, final landscape width.
+  window.addEventListener('orientationchange', () => {
+    setTimeout(() => applyBoardSize(boardSizePx, false), 300);
+    setTimeout(() => applyBoardSize(boardSizePx, false), 700);
   });
 
   // When the tab/browser actually closes, make sure no trace of an active
