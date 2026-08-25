@@ -450,7 +450,7 @@
     box-shadow:0 3px 8px rgba(0,0,0,.35);
   }
   .ubc-btn:hover{ border-color:#fff3d6; filter:brightness(1.06); }
-  .ubc-settings-icon{ font-size:1.5em; filter:brightness(0.55) saturate(1.3); display:inline-block; vertical-align:middle; }
+  .ubc-settings-icon{ font-size:3em; filter:grayscale(1) brightness(0.4); display:inline-block; vertical-align:middle; }
   .ubc-btn.panel-open{ border-color:#fff3d6; filter:brightness(1.12); box-shadow:0 0 0 2px rgba(255,255,255,.25), 0 3px 8px rgba(0,0,0,.35); }
   @media (max-width:600px){ .ubc-btn{ font-size:14px; padding:6px 11px; } }
   .ubc-play-btn{
@@ -8091,24 +8091,10 @@
       appendChatMessage(t('systemLabel'), t('nothingToUndo'), true);
       return;
     }
-    undoAgreed = new Set();
-    document.getElementById('undo-color').textContent = colorLabel(turn);
-    const wrap = document.getElementById('undo-players');
-    wrap.innerHTML='';
-    uniquePlayers(mode).forEach(p=>{
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'undo-player-btn';
-      btn.textContent = p + ' ' + t('agreeSuffix');
-      btn.addEventListener('click', ()=>{
-        if(undoAgreed.has(p)) undoAgreed.delete(p); else undoAgreed.add(p);
-        btn.classList.toggle('agreed', undoAgreed.has(p));
-        document.getElementById('undo-confirm').disabled = undoAgreed.size < uniquePlayers(mode).length;
-      });
-      wrap.appendChild(btn);
-    });
-    document.getElementById('undo-confirm').disabled = true;
-    document.getElementById('undo-modal').classList.add('show');
+    // Offline: one person is at the controls for every seat, so asking
+    // them to individually "agree" as each player is just an extra click
+    // with no real purpose — undo right away instead.
+    performLocalUndo();
   }
   document.getElementById('undo-btn').addEventListener('click', openUndoModal);
   document.getElementById('undo-cancel').addEventListener('click', async ()=>{
