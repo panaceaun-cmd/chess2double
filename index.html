@@ -1203,12 +1203,6 @@
     font-family:'Cinzel',serif; color:var(--ink); font-size:17px;
     margin-bottom:22px; line-height:1.4;
   }
-  #landscape-prompt-btn{
-    background:linear-gradient(180deg, #ecd190, var(--brass) 70%);
-    color:#2a1c0c; border:1px solid var(--brass); border-radius:10px;
-    padding:14px 28px; font-size:18px; font-weight:700; cursor:pointer;
-    font-family:'Inter',sans-serif;
-  }
   .pause-icon-bars{ display:inline-flex; gap:3px; flex:0 0 auto; }
   .pause-icon-bars span{ display:block; width:4px; height:14px; background:var(--brass); border-radius:1px; }
   .pause-icon-play{
@@ -1323,7 +1317,6 @@
   <div class="landscape-prompt-card">
     <div class="landscape-prompt-icon">⤢</div>
     <div class="landscape-prompt-text" id="landscape-prompt-text">Поверните телефон в альбомный режим</div>
-    <button id="landscape-prompt-btn" type="button">⤢ <span id="landscape-prompt-btn-label">Повернуть</span></button>
   </div>
 </div>
 
@@ -2910,7 +2903,6 @@
     setText('pause-btn-label', isPaused ? t('resumeLabel') : t('pauseLabel'));
     setText('landscape-btn-label', t('landscapeModeLabel'));
     setText('landscape-prompt-text', t('landscapePromptMsg'));
-    setText('landscape-prompt-btn-label', t('landscapePromptBtn'));
     setText('paused-overlay-text', t('pausedBanner'));
     document.getElementById('pause-btn').setAttribute('aria-label', isPaused ? t('resumeLabel') : t('pauseLabel'));
     populateOrientationSelect();
@@ -6760,8 +6752,18 @@
   }
   const landscapeBtnEl = document.getElementById('landscape-btn');
   if(landscapeBtnEl) landscapeBtnEl.addEventListener('click', tryLockLandscape);
-  const landscapePromptBtnEl = document.getElementById('landscape-prompt-btn');
-  if(landscapePromptBtnEl) landscapePromptBtnEl.addEventListener('click', tryLockLandscape);
+  // Deliberately NOT wired to tryLockLandscape (requestFullscreen +
+  // screen.orientation.lock) — that combination is exactly what caused the
+  // broken "tap it, and portrait mode shows a tiny board" behavior: on
+  // several mobile browsers, entering fullscreen can transiently confuse
+  // orientation detection while the lock itself either isn't supported at
+  // all (iOS Safari never implements screen.orientation.lock) or is
+  // rejected, leaving the CSS orientation media query and the actual
+  // physical orientation out of sync for a moment. The reliable mechanism
+  // needs no JS here at all: the media query below reacts to real device
+  // rotation directly, and the orientationchange listener elsewhere
+  // recalculates the board size once that happens — this button's job is
+  // just to make the ask clear, not to attempt anything risky.
 
   function togglePause(){
     if(gameOver) return;
