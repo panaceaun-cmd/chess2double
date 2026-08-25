@@ -807,6 +807,15 @@
     animation:kingKilledPulse 1s ease-in-out infinite alternate;
   }
   #check-warning.show{ display:block; }
+  #queen-threat-warning{
+    display:none;
+    font-family:'Cinzel',serif; font-weight:700; letter-spacing:.04em;
+    font-size:clamp(13px,3.6vw,17px); color:#ff5c4d; text-transform:none;
+    text-shadow:0 0 8px rgba(255,60,40,.6), 0 2px 3px rgba(0,0,0,.6);
+    text-align:center; margin:4px 0 0;
+    animation:kingKilledPulse 1s ease-in-out infinite alternate;
+  }
+  #queen-threat-warning.show{ display:block; }
   #winner-identity{
     display:flex; align-items:center; justify-content:center; gap:8px;
     margin:4px 0 10px; font-size:13px; color:var(--ink);
@@ -1517,6 +1526,7 @@
       <div id="board-wrap">
         <div id="status"><span class="dots"><span class="dot w"></span></span><span id="status-text">Ход: Белые (Игрок 1)</span></div>
         <div id="check-warning">ШАХ КОРОЛЮ</div>
+        <div id="queen-threat-warning"></div>
         <button id="landscape-btn" type="button" aria-label="Повернуть в альбомный режим">⤢ <span id="landscape-btn-label">Альбомный режим</span></button>
         <div id="corner-bars-top" class="corner-bars-row">
           <div class="corner-bar" data-color="b" id="corner-bar-b"></div>
@@ -7183,7 +7193,6 @@
     lastMove = null;
     gameOver = false;
     isPaused = false;
-    lastQueenThreatSignature = '';
     takenOverBy = {};
     pendingFightOn = null;
     skipTurnPending = false;
@@ -7717,6 +7726,19 @@
     el.classList.add('show');
   }
 
+  function updateQueenThreatWarning(queenThreats){
+    const el = document.getElementById('queen-threat-warning');
+    if(!el) return;
+    if(!queenThreats || queenThreats.length === 0){
+      el.classList.remove('show');
+      el.textContent = '';
+      return;
+    }
+    const colors = [...new Set(queenThreats.map(th=>th.targetColor))].map(c=>colorLabel(c)).join(', ');
+    el.textContent = '⚠️ ' + colors + ' ' + t('queenUnderAttackMsg');
+    el.classList.add('show');
+  }
+
   function svgSquareCenter(boardEl, boardRect, r, c){
     const el = boardEl.querySelector('.sq[data-r="' + r + '"][data-c="' + c + '"]');
     if(!el) return null;
@@ -7743,7 +7765,6 @@
     svg.appendChild(dot);
   }
 
-  let lastQueenThreatSignature = '';
   function drawAttackLine(){
     const boardEl = document.getElementById('board');
     const boardWrapEl = document.getElementById('board-wrap');
@@ -7755,18 +7776,12 @@
     updateCheckWarning(threats);
 
     const pieceThreats = (gameOver || !attackHintsEnabled) ? [] : findMyPieceThreats();
-    // Queen-under-threat gets its own distinct, hard-to-miss warning in the
-    // chat log — tracked by a signature of which queens are threatened so
-    // this fires once per NEW threat, not again on every re-render while
-    // the same threat is still standing.
+    // Queen-under-threat gets its own distinct, hard-to-miss warning right
+    // above the board (next to the existing check warning), rather than a
+    // one-off chat message — it stays visible for as long as the threat
+    // does and clears the moment it's no longer there, same as check-warning.
     const queenThreats = pieceThreats.filter(th => th.targetType === 'Q');
-    const queenSignature = queenThreats.map(th => th.targetColor + th.targetR + th.targetC).sort().join(',');
-    if(queenSignature && queenSignature !== lastQueenThreatSignature){
-      queenThreats.forEach(th => {
-        appendChatMessage(t('systemLabel'), '<span style="color:#ff5c4d; font-weight:700;">⚠️ ' + escapeHtml(colorLabel(th.targetColor)) + ' ' + escapeHtml(t('queenUnderAttackMsg')) + '</span>', true);
-      });
-    }
-    lastQueenThreatSignature = queenSignature;
+    updateQueenThreatWarning(queenThreats);
 
     const showCaptureLine = lastMove && lastMove.capture;
     if(!showCaptureLine && threats.length === 0 && pieceThreats.length === 0) return;
