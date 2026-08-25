@@ -589,6 +589,23 @@
   .piece.yellow{ --piece-stroke-w:var(--piece-stroke-w-yellow); --piece-stroke-color:var(--piece-stroke-color-yellow); color:var(--accent-yellow); -webkit-text-stroke:var(--piece-stroke-w) var(--piece-stroke-color);}
   .piece.grey{ --piece-stroke-w:var(--piece-stroke-w-grey); --piece-stroke-color:var(--piece-stroke-color-grey); color:var(--accent-grey); -webkit-text-stroke:var(--piece-stroke-w) var(--piece-stroke-color);}
   .piece.face-far{ transform:rotate(180deg); }
+  @keyframes pieceKickImpact{
+    0%{ transform:scale(1) rotate(0deg); }
+    35%{ transform:scale(1.28) rotate(-10deg); }
+    65%{ transform:scale(0.92) rotate(5deg); }
+    100%{ transform:scale(1) rotate(0deg); }
+  }
+  .piece-kick-impact{ animation:pieceKickImpact .32s ease-out; transform-origin:50% 60%; }
+  @keyframes pieceFallOver{
+    0%{ transform:translate(0,0) rotate(0deg) scale(1); opacity:1; }
+    100%{ transform:translate(var(--fall-x,26px), 46px) rotate(var(--fall-rot,110deg)) scale(.65); opacity:0; }
+  }
+  .captured-piece-ghost{
+    position:fixed; pointer-events:none; z-index:60;
+    display:flex; align-items:center; justify-content:center;
+    line-height:1; filter:drop-shadow(0 2px 2px rgba(0,0,0,.55));
+    animation:pieceFallOver .5s cubic-bezier(.4,.6,.6,1) forwards;
+  }
 
   /* Piece SHAPE (actual silhouette geometry) — different fonts draw the same
      chess Unicode characters with genuinely different proportions: crown
@@ -7598,6 +7615,7 @@
     // square afterward, at 2 squares/second. See lastAnimatedMoveRef above
     // for why lastMove is compared by reference here.
     let animateFromRect = null;
+    let capturedPieceRect = null;
     const isNewMove = !!(lastMove && lastMove !== lastAnimatedMoveRef);
     if(isNewMove){
       const fromSq = boardEl.querySelector('.sq[data-r="' + lastMove.from.r + '"][data-c="' + lastMove.from.c + '"]');
@@ -7605,6 +7623,14 @@
       if(fromPieceEl){
         const rect = fromPieceEl.getBoundingClientRect();
         if(rect.width > 0 && rect.height > 0) animateFromRect = rect;
+      }
+      if(lastMove.capture){
+        const toSqBefore = boardEl.querySelector('.sq[data-r="' + lastMove.to.r + '"][data-c="' + lastMove.to.c + '"]');
+        const capturedPieceEl = toSqBefore ? toSqBefore.querySelector('.piece') : null;
+        if(capturedPieceEl){
+          const rect = capturedPieceEl.getBoundingClientRect();
+          if(rect.width > 0 && rect.height > 0) capturedPieceRect = rect;
+        }
       }
     }
 
@@ -7739,11 +7765,51 @@
               toPieceEl.style.transform = '';
               toPieceEl.style.position = '';
               toPieceEl.style.zIndex = '';
+              if(lastMove.capture && capturedPieceRect){
+                playCaptureKickAnimation(toPieceEl, capturedPieceRect, lastMove);
+              }
             }, {once:true});
           }
         }
       }
     }
+  }
+
+  // Brief "kick" flourish when a capture lands: the attacker gets a quick
+  // impact bounce, and a temporary ghost of the captured piece (rendered
+  // with its own real glyph/color) flies off and fades from right where it
+  // stood. The ghost is position:fixed and appended to <body>, so — unlike
+  // the pieces still on the board — it's completely outside #board's own
+  // rotation and needs no flip compensation of its own.
+  function playCaptureKickAnimation(attackerEl, capturedRect, move){
+    attackerEl.classList.remove('piece-kick-impact');
+    void attackerEl.offsetWidth; // restart the animation if it's already mid-play from a rapid prior capture
+    attackerEl.classList.add('piece-kick-impact');
+    attackerEl.addEventListener('animationend', () => {
+      attackerEl.classList.remove('piece-kick-impact');
+    }, {once:true});
+
+    const ghost = document.createElement('span');
+    ghost.className = 'piece captured-piece-ghost ' + CSSCOLOR[move.capturedColor];
+    ghost.textContent = GLYPH[move.capturedColor][move.capturedType];
+    ghost.style.left = capturedRect.left + 'px';
+    ghost.style.top = capturedRect.top + 'px';
+    ghost.style.width = capturedRect.width + 'px';
+    ghost.style.height = capturedRect.height + 'px';
+    ghost.style.fontSize = getComputedStyle(attackerEl).fontSize;
+    // fall away continuing roughly the same direction the attacker came
+    // from, so it visually reads as "knocked" rather than falling randomly
+    const dr = move.to.r - move.from.r, dc = move.to.c - move.from.c;
+    const mag = Math.hypot(dr, dc) || 1;
+    const fallX = (dc / mag) * 34;
+    const fallRot = (dc >= 0 ? 1 : -1) * (95 + Math.random()*30);
+    ghost.style.setProperty('--fall-x', fallX + 'px');
+    ghost.style.setProperty('--fall-rot', fallRot + 'deg');
+    document.body.appendChild(ghost);
+    ghost.addEventListener('animationend', () => { ghost.remove(); }, {once:true});
+    // safety net in case animationend never fires for some reason (e.g. the
+    // element got hidden mid-flight) — don't leave a stray node behind
+    setTimeout(() => { if(ghost.parentNode) ghost.remove(); }, 900);
   }
 
   function findKingThreats(){
