@@ -7700,6 +7700,8 @@
             // it, or they'd visually snap to facing the wrong way for the
             // duration of the animation.
             const baseTransform = toPieceEl.classList.contains('face-far') ? ' rotate(180deg)' : '';
+            toPieceEl.style.position = 'relative';
+            toPieceEl.style.zIndex = '50';
             toPieceEl.style.transition = 'none';
             toPieceEl.style.transform = 'translate(' + dx + 'px,' + dy + 'px)' + baseTransform;
             toPieceEl.getBoundingClientRect(); // force reflow so the offset is registered before animating away from it
@@ -7708,6 +7710,8 @@
             toPieceEl.addEventListener('transitionend', () => {
               toPieceEl.style.transition = '';
               toPieceEl.style.transform = '';
+              toPieceEl.style.position = '';
+              toPieceEl.style.zIndex = '';
             }, {once:true});
           }
         }
