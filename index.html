@@ -2185,6 +2185,12 @@
     drawAttackLine();
   });
   let capturedFrom = {w:[], b:[], y:[], g:[]};
+  // Tracks which lastMove object has already been animated — lastMove is a
+  // brand-new object every time a move happens (see doMove), so comparing
+  // by reference reliably tells a genuinely new move apart from a
+  // re-render triggered by something else (selecting a piece, a resize,
+  // etc.), which shouldn't replay the movement animation.
+  let lastAnimatedMoveRef = null;
   try{
     orientationMode = parseInt(localStorage.getItem('chess2-orientation')) || 1;
     boardTheme = localStorage.getItem('chess2-theme') || 'beige-brown';
@@ -7569,6 +7575,22 @@
     const pauseBtn = document.getElementById('pause-btn');
     if(pauseBtn) updatePttHoldButtonVisibility();
     const boardEl = document.getElementById('board');
+
+    // Capture the moving piece's CURRENT on-screen position before the DOM
+    // gets rebuilt, so it can be smoothly animated from there to its new
+    // square afterward, at 2 squares/second. See lastAnimatedMoveRef above
+    // for why lastMove is compared by reference here.
+    let animateFromRect = null;
+    const isNewMove = !!(lastMove && lastMove !== lastAnimatedMoveRef);
+    if(isNewMove){
+      const fromSq = boardEl.querySelector('.sq[data-r="' + lastMove.from.r + '"][data-c="' + lastMove.from.c + '"]');
+      const fromPieceEl = fromSq ? fromSq.querySelector('.piece') : null;
+      if(fromPieceEl){
+        const rect = fromPieceEl.getBoundingClientRect();
+        if(rect.width > 0 && rect.height > 0) animateFromRect = rect;
+      }
+    }
+
     boardEl.innerHTML='';
     boardEl.dataset.theme = boardTheme;
     // Online: each player always sees their own pieces on the near ranks,
@@ -7660,6 +7682,37 @@
     corner2.className = 'coord-cell coord-corner';
     boardEl.appendChild(corner2);
     drawAttackLine();
+
+    if(isNewMove){
+      lastAnimatedMoveRef = lastMove;
+      if(animateFromRect){
+        const toSq = boardEl.querySelector('.sq[data-r="' + lastMove.to.r + '"][data-c="' + lastMove.to.c + '"]');
+        const toPieceEl = toSq ? toSq.querySelector('.piece') : null;
+        if(toPieceEl){
+          const toRect = toPieceEl.getBoundingClientRect();
+          const dx = animateFromRect.left - toRect.left;
+          const dy = animateFromRect.top - toRect.top;
+          if(dx !== 0 || dy !== 0){
+            const distSquares = Math.hypot(lastMove.to.r - lastMove.from.r, lastMove.to.c - lastMove.from.c);
+            const durationMs = Math.max(80, (distSquares / 2) * 1000); // 2 squares/second
+            // .face-far pieces are already rotated via a CSS class — chain
+            // that rotation alongside the translate instead of overwriting
+            // it, or they'd visually snap to facing the wrong way for the
+            // duration of the animation.
+            const baseTransform = toPieceEl.classList.contains('face-far') ? ' rotate(180deg)' : '';
+            toPieceEl.style.transition = 'none';
+            toPieceEl.style.transform = 'translate(' + dx + 'px,' + dy + 'px)' + baseTransform;
+            toPieceEl.getBoundingClientRect(); // force reflow so the offset is registered before animating away from it
+            toPieceEl.style.transition = 'transform ' + durationMs + 'ms linear';
+            toPieceEl.style.transform = baseTransform ? baseTransform.trim() : '';
+            toPieceEl.addEventListener('transitionend', () => {
+              toPieceEl.style.transition = '';
+              toPieceEl.style.transform = '';
+            }, {once:true});
+          }
+        }
+      }
+    }
   }
 
   function findKingThreats(){
