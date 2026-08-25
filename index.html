@@ -1366,6 +1366,11 @@
         <div class="local-player-bot-row"><select class="lp-bot-select" id="lp-bot-4" data-n="4"></select></div>
       </div>
 
+      <div id="history-panel">
+        <div class="panel-header" id="history-title">📜 История ходов</div>
+        <div id="history-log"><div class="no-players">Ходов ещё не было.</div></div>
+      </div>
+
       <!-- record-start-btn/record-stop-btn stay in the page, hidden — the
            under-board 🔴 Начать запись button now triggers them directly
            via toggleRecording() instead of revealing this panel first.
@@ -1374,9 +1379,7 @@
       <button class="btn" id="record-start-btn" style="display:none;">🔴 Начать запись</button>
       <button class="btn secondary" id="record-stop-btn" style="display:none;">⏹ Остановить и сохранить</button>
       <div class="record-status" id="record-status" style="text-align:center; margin-top:6px;"></div>
-      </div>
 
-      <div class="sidebar-col" id="sidebar-col-2">
       <!-- rules-toggle, stats-btn, settings-toggle-btn stay in the page —
            just not inside any visible menu block — because the top Правила
            button and the under-board Статистика/Настройки buttons still
@@ -1391,11 +1394,6 @@
       <div id="captured-panel">
         <div class="panel-header" id="captured-title">💀 Взятые фигуры</div>
         <div id="captured-list"></div>
-      </div>
-
-      <div id="history-panel">
-        <div class="panel-header" id="history-title">📜 История ходов</div>
-        <div id="history-log"><div class="no-players">Ходов ещё не было.</div></div>
       </div>
       </div>
 
