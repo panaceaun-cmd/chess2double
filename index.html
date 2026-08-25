@@ -1139,7 +1139,7 @@
     flex:1 1 auto; min-width:0;
   }
   #pause-btn{
-    position:static; flex:0 0 auto; z-index:22;
+    position:static; flex:0 0 auto; z-index:22; margin-left:auto;
     display:flex; align-items:center; gap:14px;
     background:rgba(15,9,6,.85); border:1px solid var(--brass-dim); border-radius:10px;
     color:var(--brass); padding:14px 24px; cursor:pointer;
@@ -1467,7 +1467,7 @@
             <button class="ubc-btn ubc-play-btn" id="ubc-play" type="button" data-toggle="local-players-panel,online-panel">▶️ Играть</button>
             <button class="ubc-btn" id="ubc-restart" type="button">Новая партия</button>
             <button class="ubc-btn" id="ubc-undo" type="button" data-action="undo">Отменить ход</button>
-            <button class="ubc-btn" id="ubc-settings" type="button" data-action="settings">Настройки</button>
+            <button class="ubc-btn" id="ubc-settings" type="button" data-action="settings">⚙️ Настройки</button>
             <button class="ubc-btn" id="ubc-player-chat" type="button" data-toggle="chat-panel">Голосовая связь/Чат</button>
             <button class="ubc-btn" id="ubc-history" type="button" data-toggle="history-panel">История ходов</button>
             <button class="ubc-btn" id="ubc-stats" type="button" data-action="stats">Статистика</button>
@@ -2892,7 +2892,7 @@
     setText('restart-confirm-title', t('restartConfirmTitle'));
     setText('restart-confirm-yes', t('restartConfirmYesBtn'));
     setText('restart-confirm-no', t('restartConfirmNoBtn'));
-    setText('ubc-settings', t('ubcSettingsBtn'));
+    setText('ubc-settings', '⚙️ ' + t('ubcSettingsBtn'));
     setText('ubc-player-chat', t('discussTitle').replace(/^[^\p{L}]+/u, ''));
     setText('ubc-history', t('ubcHistoryBtn'));
     setText('ubc-stats', t('ubcStatsBtn'));
