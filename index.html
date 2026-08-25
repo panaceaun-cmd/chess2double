@@ -816,6 +816,13 @@
     animation:kingKilledPulse 1s ease-in-out infinite alternate;
   }
   #queen-threat-warning.show{ display:block; }
+  #last-capture-banner{
+    display:none;
+    font-family:'Inter',sans-serif; font-weight:600;
+    font-size:clamp(12px,3.2vw,15px); color:#ff8a75;
+    text-align:center; margin:4px 0 0;
+  }
+  #last-capture-banner.show{ display:block; }
   #winner-identity{
     display:flex; align-items:center; justify-content:center; gap:8px;
     margin:4px 0 10px; font-size:13px; color:var(--ink);
@@ -1527,6 +1534,7 @@
         <div id="status"><span class="dots"><span class="dot w"></span></span><span id="status-text">Ход: Белые (Игрок 1)</span></div>
         <div id="check-warning">ШАХ КОРОЛЮ</div>
         <div id="queen-threat-warning"></div>
+        <div id="last-capture-banner"></div>
         <button id="landscape-btn" type="button" aria-label="Повернуть в альбомный режим">⤢ <span id="landscape-btn-label">Альбомный режим</span></button>
         <div id="corner-bars-top" class="corner-bars-row">
           <div class="corner-bar" data-color="b" id="corner-bar-b"></div>
@@ -7388,6 +7396,7 @@
       from, to:{r:move.r,c:move.c},
       type: piece.type, color: piece.color,
       capture: !!captured, capturedType: captured ? captured.type : null,
+      capturedColor: captured ? captured.color : null,
       castle: !!move.castle, enPassant: !!move.enPassant,
       promotion: !!move.promotion, promotedTo: null
     };
@@ -7739,6 +7748,21 @@
     el.classList.add('show');
   }
 
+  function updateLastCaptureBanner(move){
+    const el = document.getElementById('last-capture-banner');
+    if(!el) return;
+    if(!move || !move.capture){
+      el.classList.remove('show');
+      el.textContent = '';
+      return;
+    }
+    const attackerType = move.promotedTo || move.type;
+    const attackerDesc = colorLabel(move.color) + ' ' + pieceName(attackerType);
+    const targetDesc = colorLabel(move.capturedColor) + ' ' + pieceName(move.capturedType);
+    el.textContent = '⚔️ ' + attackerDesc + ' ' + t('captureConnectorWord') + ' ' + targetDesc + '.';
+    el.classList.add('show');
+  }
+
   function svgSquareCenter(boardEl, boardRect, r, c){
     const el = boardEl.querySelector('.sq[data-r="' + r + '"][data-c="' + c + '"]');
     if(!el) return null;
@@ -7784,6 +7808,7 @@
     updateQueenThreatWarning(queenThreats);
 
     const showCaptureLine = lastMove && lastMove.capture;
+    updateLastCaptureBanner(showCaptureLine ? lastMove : null);
     if(!showCaptureLine && threats.length === 0 && pieceThreats.length === 0) return;
 
     // Deliberately appended to board-wrap, NOT board itself. #board gets a
@@ -8057,12 +8082,6 @@
     maybeTriggerBotMove();
   }
   function afterMove(captured){
-    if(captured && lastMove){
-      const attackerType = lastMove.promotedTo || lastMove.type;
-      const attackerDesc = colorLabel(lastMove.color) + ' ' + pieceName(attackerType);
-      const targetDesc = colorLabel(captured.color) + ' ' + pieceName(captured.type);
-      appendChatMessage(t('systemLabel'), '⚔️ ' + attackerDesc + ' ' + t('captureConnectorWord') + ' ' + targetDesc + '.', true);
-    }
     if(captured) pushCaptured(captured.color, captured.type);
     if(captured && captured.type==='K'){
       if(mode === 'ffa'){
