@@ -4135,12 +4135,18 @@
   }
 
   async function pollMyInvite(){
-    if(!STORAGE_OK || !myNick || (onlineRoomId && !onlineWaitingOnly)) return;
+    if(!STORAGE_OK || !myNick) return;
     if(document.getElementById('invite-modal').classList.contains('show')) return;
     const raw = await storeGet('invite:' + myNick, true);
     if(!raw) return;
     let inv; try{ inv = JSON.parse(raw); }catch(e){ return; }
     if(!inv || Date.now() - inv.ts > 40000) return;
+    // Already seated in an active room — only let this through if it's a
+    // re-invite for THAT SAME room (e.g. an opponent who dropped and
+    // reconnected, re-sending the invite since I never got my own resume
+    // prompt for it). A genuinely unrelated invite from someone else
+    // shouldn't interrupt an active game.
+    if(onlineRoomId && !onlineWaitingOnly && inv.roomId !== onlineRoomId) return;
     document.getElementById('invite-text').textContent = inv.from + ' ' + t('inviteFromSuffix');
     document.getElementById('invite-modal').classList.add('show');
     document.getElementById('invite-accept').onclick = async ()=>{
@@ -4808,8 +4814,19 @@
     if(roomLeftFbRef){ try{ roomLeftFbRef.off(); }catch(e){} roomLeftFbRef = null; }
   }
 
+  // Keeps chess2-last-room's timestamp reflecting recent activity, not just
+  // the moment the room was first joined — offerResumeIfInterrupted treats
+  // this as stale after roughly 10 minutes, which a real chess game can
+  // easily outlast while still very much in progress. Called on every
+  // synced move (both sending and receiving), so a genuinely active game
+  // never goes stale, while an abandoned one still correctly does.
+  function refreshLastRoomTimestamp(){
+    if(!onlineRoomId || !onlineSide) return;
+    try{ localStorage.setItem('chess2-last-room', JSON.stringify({roomId: onlineRoomId, seat: onlineSide, ts: Date.now()})); }catch(e){}
+  }
   function applyRemoteState(room){
     document.getElementById('skip-turn-info-modal').classList.remove('show');
+    refreshLastRoomTimestamp();
     board = room.board;
     turnIndex = room.turnIndex;
     turn = TURN_ORDER[turnIndex];
@@ -4857,6 +4874,7 @@
 
   async function pushRoomState(winnerTeam){
     if(!onlineRoomId) return false;
+    refreshLastRoomTimestamp();
     onlineMoveSeq += 1;
     const payload = {
       mode: mode,
