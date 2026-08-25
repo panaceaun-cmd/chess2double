@@ -2129,6 +2129,14 @@
   let pieceStyle = 1;
   const DEFAULT_ACCENT = {w:'#fbf6ec', b:'#1b1310', y:'#e8c33e', g:'#9a9691'};
   let boardSizePx = 32;
+  // The user's actual chosen size, kept separate from boardSizePx (which is
+  // always clamped to whatever currently fits). Without this split, a
+  // rotation/resize recalculation would permanently shrink the user's
+  // choice every time it briefly saw a narrower viewport (e.g. mid-
+  // rotation, or while the portrait-blocking overlay was up), with no way
+  // to ever grow back — this is what caused the board to get stuck small
+  // even after being set to fill the screen.
+  let preferredBoardSizePx = 32;
   let capturedFrom = {w:[], b:[], y:[], g:[]};
   try{
     orientationMode = parseInt(localStorage.getItem('chess2-orientation')) || 1;
@@ -2336,6 +2344,7 @@
     return best;
   }
   function applyBoardSize(px, save){
+    preferredBoardSizePx = px;
     const maxFit = maxFittingBoardSize();
     px = Math.min(px, maxFit);
     boardSizePx = px;
@@ -2347,7 +2356,7 @@
       range.max = String(maxFit);
       if(parseInt(range.value) !== px) range.value = px;
     }
-    if(save){ try{ localStorage.setItem('chess2-boardsize', String(px)); }catch(e){} }
+    if(save){ try{ localStorage.setItem('chess2-boardsize', String(preferredBoardSizePx)); }catch(e){} }
     // Sync the corner-bar rows to the board's own actual width — without
     // this, their own content (a long nickname, a full row of captured-
     // piece icons) can need more room than a small board does, and since
@@ -8242,7 +8251,7 @@
   let boardSizeResizeTimer = null;
   window.addEventListener('resize', () => {
     clearTimeout(boardSizeResizeTimer);
-    boardSizeResizeTimer = setTimeout(() => applyBoardSize(boardSizePx, false), 150);
+    boardSizeResizeTimer = setTimeout(() => applyBoardSize(preferredBoardSizePx, false), 150);
   });
   // Rotating a phone is its own event, not just a resize — some mobile
   // browsers fire 'resize' with stale/intermediate width/height mid-
@@ -8250,10 +8259,13 @@
   // new orientation, so a single quick recalculation can end up computing
   // the board size against the OLD dimensions and get stuck small. This
   // recalculates twice — once shortly after, and again a bit later as a
-  // safety net — so it lands on the real, final landscape width.
+  // safety net — so it lands on the real, final landscape width. Re-fits
+  // from preferredBoardSizePx (the user's actual choice), not boardSizePx
+  // (whatever's currently clamped) — otherwise a momentary narrow reading
+  // during the rotation would permanently shrink the preference itself.
   window.addEventListener('orientationchange', () => {
-    setTimeout(() => applyBoardSize(boardSizePx, false), 300);
-    setTimeout(() => applyBoardSize(boardSizePx, false), 700);
+    setTimeout(() => applyBoardSize(preferredBoardSizePx, false), 300);
+    setTimeout(() => applyBoardSize(preferredBoardSizePx, false), 700);
   });
 
   // When the tab/browser actually closes, make sure no trace of an active
