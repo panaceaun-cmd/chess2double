@@ -4673,13 +4673,12 @@
         gameOver = true;
         render(); updateStatus();
         showWinnerOnline(onlineSide, 'left');
-        if(voiceActive) stopVoiceChatInternal();
-        if(groupVoiceActive) stopGroupVoice();
-        stopFileShareListener();
-        if(fbDb && onlineRoomId){
-          try{ fbDb.ref('voice-signal/' + onlineRoomId).remove(); }catch(e){}
-          try{ fbDb.ref('file-signal/' + onlineRoomId).remove(); }catch(e){}
-        }
+        // leaveOnlineGame does the same full cleanup "Покинуть игру" does —
+        // resets the online-panel's stale "still connected to X" display
+        // and starts a fresh game, rather than leaving the panel showing a
+        // session that's already over. false = don't notify the opponent,
+        // they're the one who's gone.
+        leaveOnlineGame(false);
       }
       return;
     }
