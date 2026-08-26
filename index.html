@@ -7619,18 +7619,18 @@
     const isNewMove = !!(lastMove && lastMove !== lastAnimatedMoveRef);
     if(isNewMove){
       const fromSq = boardEl.querySelector('.sq[data-r="' + lastMove.from.r + '"][data-c="' + lastMove.from.c + '"]');
-      const fromPieceEl = fromSq ? fromSq.querySelector('.piece') : null;
-      if(fromPieceEl){
-        const rect = fromPieceEl.getBoundingClientRect();
+      if(fromSq){
+        const rect = fromSq.getBoundingClientRect();
         if(rect.width > 0 && rect.height > 0) animateFromRect = rect;
       }
       if(lastMove.capture){
         const toSqBefore = boardEl.querySelector('.sq[data-r="' + lastMove.to.r + '"][data-c="' + lastMove.to.c + '"]');
-        const capturedPieceEl = toSqBefore ? toSqBefore.querySelector('.piece') : null;
-        if(capturedPieceEl){
-          const rect = capturedPieceEl.getBoundingClientRect();
+        if(toSqBefore){
+          const rect = toSqBefore.getBoundingClientRect();
           if(rect.width > 0 && rect.height > 0){
-            capturedGhostEl = spawnStandingCapturedGhost(rect, lastMove);
+            const capturedPieceEl = toSqBefore.querySelector('.piece');
+            const wasFaceFar = !!(capturedPieceEl && capturedPieceEl.classList.contains('face-far'));
+            capturedGhostEl = spawnStandingCapturedGhost(rect, lastMove, wasFaceFar);
             // Safety net: whatever happens to the attacker's own animation
             // downstream (its old position couldn't be captured, its new
             // element wasn't found, etc.), this guarantees the ghost's
@@ -7746,7 +7746,7 @@
         const toSq = boardEl.querySelector('.sq[data-r="' + lastMove.to.r + '"][data-c="' + lastMove.to.c + '"]');
         const toPieceEl = toSq ? toSq.querySelector('.piece') : null;
         if(toPieceEl){
-          const toRect = toPieceEl.getBoundingClientRect();
+          const toRect = toSq.getBoundingClientRect();
           let dx = animateFromRect.left - toRect.left;
           let dy = animateFromRect.top - toRect.top;
           // The piece lives inside #board, which is itself rotated 180°
@@ -7800,15 +7800,15 @@
   // vanishing the instant the board data updates while the attacker is
   // still visually en route. Returns the element so the fall can be
   // triggered on it later, at the actual moment of impact.
-  function spawnStandingCapturedGhost(capturedRect, move){
+  function spawnStandingCapturedGhost(capturedRect, move, wasFaceFar){
     const ghost = document.createElement('span');
-    ghost.className = 'piece captured-piece-ghost ' + CSSCOLOR[move.capturedColor];
+    ghost.className = 'piece captured-piece-ghost ' + CSSCOLOR[move.capturedColor] + (wasFaceFar ? ' face-far' : '');
     ghost.textContent = GLYPH[move.capturedColor][move.capturedType];
     ghost.style.left = capturedRect.left + 'px';
     ghost.style.top = capturedRect.top + 'px';
     ghost.style.width = capturedRect.width + 'px';
     ghost.style.height = capturedRect.height + 'px';
-    ghost.style.fontSize = capturedRect.height + 'px';
+    ghost.style.fontSize = (capturedRect.height * 0.92) + 'px';
     ghost.style.animation = 'none'; // standing still — no fall yet
     document.body.appendChild(ghost);
     return ghost;
