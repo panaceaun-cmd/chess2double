@@ -4726,6 +4726,7 @@
     } else {
       document.getElementById('waiting-text').textContent = t('searchingOpponent');
       document.getElementById('waiting-banner').classList.add('show');
+      clearInterval(queueWaitTimer);
       queueWaitTimer = setInterval(pollMatchAssigned, 2500);
     }
   }
@@ -4799,6 +4800,7 @@
     onlineRoomId = roomId; onlineSide = side; onlineWaitingOnly = true;
     document.getElementById('waiting-text').textContent = t('waitingForAccept') + ' ' + targetNick + ' ' + t('waitingAcceptSuffix');
     document.getElementById('waiting-banner').classList.add('show');
+    clearInterval(onlinePollTimer);
     onlinePollTimer = setInterval(async ()=>{
       const raw = await storeGet('room:' + roomId, true);
       if(!raw) return;
@@ -4818,6 +4820,7 @@
     onlineRoomId = roomId; onlineSide = side; onlineWaitingOnly = true;
     document.getElementById('waiting-text').textContent = t('waitingPlayersLabel');
     document.getElementById('waiting-banner').classList.add('show');
+    clearInterval(onlinePollTimer);
     onlinePollTimer = setInterval(async ()=>{
       const raw = await storeGet('room:' + roomId, true);
       if(!raw) return;
