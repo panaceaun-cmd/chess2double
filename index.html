@@ -601,7 +601,7 @@
     100%{ transform:translate(var(--fall-x,26px), 46px) rotate(var(--fall-rot,110deg)) scale(.65); opacity:0; }
   }
   .captured-piece-ghost{
-    position:fixed; pointer-events:none; z-index:60;
+    position:absolute; inset:0; pointer-events:none; z-index:5;
     display:flex; align-items:center; justify-content:center;
     line-height:1; filter:drop-shadow(0 2px 2px rgba(0,0,0,.55));
     animation:pieceFallOver .5s cubic-bezier(.4,.6,.6,1) forwards;
@@ -7729,7 +7729,7 @@
         const toRect = toSq.getBoundingClientRect();
         let capturedGhostEl = null;
         if(lastMove.capture && toRect.width > 0 && toRect.height > 0){
-          capturedGhostEl = spawnStandingCapturedGhost(toRect, lastMove, capturedWasFaceFar);
+          capturedGhostEl = spawnStandingCapturedGhost(toSq, lastMove, capturedWasFaceFar);
           // Safety net: whatever happens to the attacker's own animation
           // downstream, this guarantees the ghost's fall eventually
           // triggers rather than being stuck standing forever. Real
@@ -7802,17 +7802,12 @@
   // vanishing the instant the board data updates while the attacker is
   // still visually en route. Returns the element so the fall can be
   // triggered on it later, at the actual moment of impact.
-  function spawnStandingCapturedGhost(capturedRect, move, wasFaceFar){
+  function spawnStandingCapturedGhost(parentSq, move, wasFaceFar){
     const ghost = document.createElement('span');
     ghost.className = 'piece captured-piece-ghost ' + CSSCOLOR[move.capturedColor] + (wasFaceFar ? ' face-far' : '');
     ghost.textContent = GLYPH[move.capturedColor][move.capturedType];
-    ghost.style.left = capturedRect.left + 'px';
-    ghost.style.top = capturedRect.top + 'px';
-    ghost.style.width = capturedRect.width + 'px';
-    ghost.style.height = capturedRect.height + 'px';
-    ghost.style.fontSize = (capturedRect.height * 0.92) + 'px';
     ghost.style.animation = 'none'; // standing still — no fall yet
-    document.body.appendChild(ghost);
+    parentSq.appendChild(ghost);
     return ghost;
   }
   // Called at the moment the attacker actually arrives — gives it a quick
