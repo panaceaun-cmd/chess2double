@@ -2462,6 +2462,131 @@
     sel.innerHTML = uniquePlayers(mode).map(p=>'<option>'+p+'</option>').join('');
   }
 
+  // ================= MOVE SOUND EFFECTS =================
+  // All sounds here are synthesized directly via the Web Audio API rather
+  // than loaded from audio files, since this is a single self-contained
+  // HTML file with no separate asset files to ship. The AudioContext is
+  // created lazily on first use — browsers require a genuine user gesture
+  // before audio is allowed to play, and the very first move click already
+  // satisfies that requirement.
+  let sfxAudioCtx = null;
+  function getSfxAudioCtx(){
+    if(!sfxAudioCtx){
+      try{ sfxAudioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+      catch(e){ return null; }
+    }
+    if(sfxAudioCtx.state === 'suspended'){ try{ sfxAudioCtx.resume(); }catch(e){} }
+    return sfxAudioCtx;
+  }
+  function makeNoiseBuffer(ctx, durationSec){
+    const bufferSize = Math.max(1, Math.floor(ctx.sampleRate * durationSec));
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for(let i=0;i<bufferSize;i++) data[i] = Math.random()*2-1;
+    return buffer;
+  }
+  // A short, dry knock — like a knuckle tapping the board. Played when a
+  // (non-capturing) piece starts moving, and again the moment it lands.
+  function playKnockSound(){
+    const ctx = getSfxAudioCtx();
+    if(!ctx) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(340, now);
+    osc.frequency.exponentialRampToValueAtTime(180, now + 0.06);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.28, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(now); osc.stop(now + 0.1);
+
+    const noise = ctx.createBufferSource();
+    noise.buffer = makeNoiseBuffer(ctx, 0.03);
+    const noiseFilter = ctx.createBiquadFilter();
+    noiseFilter.type = 'bandpass'; noiseFilter.frequency.value = 1200; noiseFilter.Q.value = 1.2;
+    const noiseGain = ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.18, now);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.03);
+    noise.connect(noiseFilter); noiseFilter.connect(noiseGain); noiseGain.connect(ctx.destination);
+    noise.start(now);
+  }
+  // Metallic "shing" — a blade being drawn. Played at the start of a move
+  // that's about to capture something.
+  function playSwordDrawSound(){
+    const ctx = getSfxAudioCtx();
+    if(!ctx) return;
+    const now = ctx.currentTime;
+    const dur = 0.35;
+    const noise = ctx.createBufferSource();
+    noise.buffer = makeNoiseBuffer(ctx, dur);
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass'; filter.Q.value = 8;
+    filter.frequency.setValueAtTime(1200, now);
+    filter.frequency.exponentialRampToValueAtTime(4200, now + dur*0.6);
+    filter.frequency.exponentialRampToValueAtTime(2600, now + dur);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.22, now + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+    noise.connect(filter); filter.connect(gain); gain.connect(ctx.destination);
+    noise.start(now);
+
+    [3100, 4700].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine'; osc.frequency.value = freq;
+      const oGain = ctx.createGain();
+      oGain.gain.setValueAtTime(0.0001, now);
+      oGain.gain.exponentialRampToValueAtTime(0.05, now + 0.04 + i*0.02);
+      oGain.gain.exponentialRampToValueAtTime(0.001, now + dur + 0.15);
+      osc.connect(oGain); oGain.connect(ctx.destination);
+      osc.start(now); osc.stop(now + dur + 0.2);
+    });
+  }
+  // Whoosh into a sharp metallic clang — a sword strike. Played at the
+  // exact moment of impact when a capture lands.
+  function playSwordStrikeSound(){
+    const ctx = getSfxAudioCtx();
+    if(!ctx) return;
+    const now = ctx.currentTime;
+    const whooshDur = 0.16;
+    const whoosh = ctx.createBufferSource();
+    whoosh.buffer = makeNoiseBuffer(ctx, whooshDur);
+    const whooshFilter = ctx.createBiquadFilter();
+    whooshFilter.type = 'bandpass'; whooshFilter.Q.value = 1.5;
+    whooshFilter.frequency.setValueAtTime(5000, now);
+    whooshFilter.frequency.exponentialRampToValueAtTime(700, now + whooshDur);
+    const whooshGain = ctx.createGain();
+    whooshGain.gain.setValueAtTime(0.001, now);
+    whooshGain.gain.exponentialRampToValueAtTime(0.25, now + 0.02);
+    whooshGain.gain.exponentialRampToValueAtTime(0.001, now + whooshDur);
+    whoosh.connect(whooshFilter); whooshFilter.connect(whooshGain); whooshGain.connect(ctx.destination);
+    whoosh.start(now);
+
+    const impactTime = now + whooshDur * 0.85;
+    const clangNoise = ctx.createBufferSource();
+    clangNoise.buffer = makeNoiseBuffer(ctx, 0.12);
+    const clangFilter = ctx.createBiquadFilter();
+    clangFilter.type = 'bandpass'; clangFilter.frequency.value = 2500; clangFilter.Q.value = 3;
+    const clangGain = ctx.createGain();
+    clangGain.gain.setValueAtTime(0.001, impactTime);
+    clangGain.gain.exponentialRampToValueAtTime(0.4, impactTime + 0.008);
+    clangGain.gain.exponentialRampToValueAtTime(0.001, impactTime + 0.12);
+    clangNoise.connect(clangFilter); clangFilter.connect(clangGain); clangGain.connect(ctx.destination);
+    clangNoise.start(impactTime);
+
+    [1800, 2650, 3900].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle'; osc.frequency.value = freq;
+      const oGain = ctx.createGain();
+      oGain.gain.setValueAtTime(0.0001, impactTime);
+      oGain.gain.exponentialRampToValueAtTime(0.12 - i*0.02, impactTime + 0.01);
+      oGain.gain.exponentialRampToValueAtTime(0.001, impactTime + 0.35 - i*0.05);
+      osc.connect(oGain); oGain.connect(ctx.destination);
+      osc.start(impactTime); osc.stop(impactTime + 0.4);
+    });
+  }
+
   function speak(text){
     if(!('speechSynthesis' in window)) return;
     try{
@@ -7943,6 +8068,7 @@
 
     if(isNewMove){
       lastAnimatedMoveRef = lastMove;
+      if(lastMove.capture) playSwordDrawSound(); else playKnockSound();
       const toSq = boardEl.querySelector('.sq[data-r="' + lastMove.to.r + '"][data-c="' + lastMove.to.c + '"]');
       const toPieceEl = toSq ? toSq.querySelector('.piece') : null;
       if(toSq && toPieceEl){
@@ -7997,6 +8123,8 @@
               toPieceEl.style.zIndex = '';
               if(lastMove.capture && capturedGhostEl){
                 triggerCaptureKickFall(toPieceEl, capturedGhostEl, lastMove);
+              } else {
+                playKnockSound();
               }
             }, {once:true});
           } else if(lastMove.capture && capturedGhostEl){
@@ -8035,6 +8163,7 @@
   // fading from right where it's been waiting.
   function triggerCaptureKickFall(attackerEl, ghost, move){
     ghost.dataset.fallTriggered = '1';
+    playSwordStrikeSound();
     if(attackerEl){
       attackerEl.classList.remove('piece-kick-impact');
       void attackerEl.offsetWidth; // restart the animation if it's already mid-play from a rapid prior capture
