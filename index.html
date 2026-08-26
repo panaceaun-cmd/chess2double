@@ -1035,12 +1035,15 @@
     display:none; align-items:center; justify-content:center; z-index:70; padding:20px;
   }
   #danger-move-confirm-modal.show{display:flex;}
-  #puzzle-selector-modal{
-    position:fixed; inset:0; background:rgba(10,6,3,.82);
-    display:none; align-items:center; justify-content:center; z-index:70; padding:20px;
+  #puzzle-selector-panel{
+    display:none;
+    max-width:520px; width:100%; margin:8px auto; box-sizing:border-box;
+    max-height:460px; overflow-y:auto;
+    background:linear-gradient(160deg,#2c1f17,#180f0a);
+    border:1px solid var(--brass); border-radius:14px;
+    padding:16px 18px; box-shadow:0 12px 34px rgba(0,0,0,.5);
   }
-  #puzzle-selector-modal.show{display:flex;}
-  #puzzle-selector-panel{ max-width:520px; width:100%; max-height:80vh; }
+  #puzzle-selector-panel.show{ display:block; }
   .puzzle-group-title{
     font-family:'Cinzel',serif; font-weight:700; color:var(--brass);
     font-size:15px; margin:14px 0 6px; text-transform:uppercase; letter-spacing:.04em;
@@ -1581,6 +1584,12 @@
         <div class="mode-hint" id="mode-hint"></div>
       </div>
 
+      <div id="puzzle-selector-panel">
+        <div class="panel-header" id="puzzle-selector-title">🎯 Тренировка: выберите задачу</div>
+        <div id="puzzle-selector-list"></div>
+        <button class="btn secondary" id="puzzle-selector-close" type="button">Закрыть</button>
+      </div>
+
       <div id="training-status-bar">
         <span id="training-status-text"></span>
         <button class="btn secondary" id="training-retry-btn" type="button">🔄 Заново</button>
@@ -1864,14 +1873,6 @@
         <button class="btn secondary" id="danger-move-confirm-no">Нет</button>
         <button class="btn" id="danger-move-confirm-yes">Да</button>
       </div>
-    </div>
-  </div>
-
-  <div id="puzzle-selector-modal">
-    <div class="modal-scroll-card" id="puzzle-selector-panel">
-      <div class="panel-header" id="puzzle-selector-title">🎯 Тренировка: выберите задачу</div>
-      <div id="puzzle-selector-list"></div>
-      <button class="btn secondary" id="puzzle-selector-close" type="button">Закрыть</button>
     </div>
   </div>
 
@@ -8349,19 +8350,20 @@
       }
       list.appendChild(btn);
     });
-    document.getElementById('puzzle-selector-modal').classList.add('show');
+    unfloatPanel(document.getElementById('board-wrap'));
+    document.getElementById('puzzle-selector-panel').classList.add('show');
   }
   function startTrainingPuzzle(puzzle){
     trainingActive = true;
     currentPuzzle = puzzle;
     mode = 'training';
-    document.getElementById('puzzle-selector-modal').classList.remove('show');
+    document.getElementById('puzzle-selector-panel').classList.remove('show');
     renderModeMenu();
     populateChatSenders();
     newGame();
   }
   document.getElementById('puzzle-selector-close').addEventListener('click', () => {
-    document.getElementById('puzzle-selector-modal').classList.remove('show');
+    document.getElementById('puzzle-selector-panel').classList.remove('show');
   });
   document.getElementById('training-retry-btn').addEventListener('click', () => {
     if(!trainingActive || !currentPuzzle) return;
@@ -8600,6 +8602,7 @@
   function updateTrainingStatusBar(){
     const bar = document.getElementById('training-status-bar');
     if(!bar) return;
+    unfloatPanel(document.getElementById('board-wrap'));
     if(!trainingActive || !currentPuzzle){
       bar.classList.remove('show');
       return;
