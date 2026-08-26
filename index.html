@@ -7615,7 +7615,7 @@
     // square afterward, at 2 squares/second. See lastAnimatedMoveRef above
     // for why lastMove is compared by reference here.
     let animateFromRect = null;
-    let capturedGhostEl = null;
+    let capturedWasFaceFar = false;
     const isNewMove = !!(lastMove && lastMove !== lastAnimatedMoveRef);
     if(isNewMove){
       const fromSq = boardEl.querySelector('.sq[data-r="' + lastMove.from.r + '"][data-c="' + lastMove.from.c + '"]');
@@ -7625,26 +7625,8 @@
       }
       if(lastMove.capture){
         const toSqBefore = boardEl.querySelector('.sq[data-r="' + lastMove.to.r + '"][data-c="' + lastMove.to.c + '"]');
-        if(toSqBefore){
-          const rect = toSqBefore.getBoundingClientRect();
-          if(rect.width > 0 && rect.height > 0){
-            const capturedPieceEl = toSqBefore.querySelector('.piece');
-            const wasFaceFar = !!(capturedPieceEl && capturedPieceEl.classList.contains('face-far'));
-            capturedGhostEl = spawnStandingCapturedGhost(rect, lastMove, wasFaceFar);
-            // Safety net: whatever happens to the attacker's own animation
-            // downstream (its old position couldn't be captured, its new
-            // element wasn't found, etc.), this guarantees the ghost's
-            // fall eventually triggers rather than being stuck standing
-            // forever. Real capture-kick calls elsewhere mark the element
-            // via dataset.fallTriggered first, making this a no-op then.
-            const thisGhost = capturedGhostEl;
-            setTimeout(() => {
-              if(thisGhost.parentNode && !thisGhost.dataset.fallTriggered){
-                triggerCaptureKickFall(null, thisGhost, lastMove);
-              }
-            }, 10000);
-          }
-        }
+        const capturedPieceEl = toSqBefore ? toSqBefore.querySelector('.piece') : null;
+        capturedWasFaceFar = !!(capturedPieceEl && capturedPieceEl.classList.contains('face-far'));
       }
     }
 
@@ -7738,15 +7720,29 @@
     const corner2 = document.createElement('div');
     corner2.className = 'coord-cell coord-corner';
     boardEl.appendChild(corner2);
-    drawAttackLine();
 
     if(isNewMove){
       lastAnimatedMoveRef = lastMove;
-      if(animateFromRect){
-        const toSq = boardEl.querySelector('.sq[data-r="' + lastMove.to.r + '"][data-c="' + lastMove.to.c + '"]');
-        const toPieceEl = toSq ? toSq.querySelector('.piece') : null;
-        if(toPieceEl){
-          const toRect = toSq.getBoundingClientRect();
+      const toSq = boardEl.querySelector('.sq[data-r="' + lastMove.to.r + '"][data-c="' + lastMove.to.c + '"]');
+      const toPieceEl = toSq ? toSq.querySelector('.piece') : null;
+      if(toSq && toPieceEl){
+        const toRect = toSq.getBoundingClientRect();
+        let capturedGhostEl = null;
+        if(lastMove.capture && toRect.width > 0 && toRect.height > 0){
+          capturedGhostEl = spawnStandingCapturedGhost(toRect, lastMove, capturedWasFaceFar);
+          // Safety net: whatever happens to the attacker's own animation
+          // downstream, this guarantees the ghost's fall eventually
+          // triggers rather than being stuck standing forever. Real
+          // capture-kick calls elsewhere mark the element via
+          // dataset.fallTriggered first, making this a no-op then.
+          const thisGhost = capturedGhostEl;
+          setTimeout(() => {
+            if(thisGhost.parentNode && !thisGhost.dataset.fallTriggered){
+              triggerCaptureKickFall(null, thisGhost, lastMove);
+            }
+          }, 10000);
+        }
+        if(animateFromRect){
           let dx = animateFromRect.left - toRect.left;
           let dy = animateFromRect.top - toRect.top;
           // The piece lives inside #board, which is itself rotated 180°
@@ -7788,9 +7784,15 @@
             // immediately instead of leaving the ghost standing forever
             triggerCaptureKickFall(toPieceEl, capturedGhostEl, lastMove);
           }
+        } else if(lastMove.capture && capturedGhostEl){
+          // attacker's own old position couldn't be captured — no travel
+          // animation to wait for, so trigger the fall immediately
+          triggerCaptureKickFall(toPieceEl, capturedGhostEl, lastMove);
         }
       }
     }
+
+    drawAttackLine();
   }
 
   // Spawns the captured-piece ghost immediately after the rebuild, standing
