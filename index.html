@@ -2435,11 +2435,17 @@
       }
       card.addEventListener('click', ()=>{
         if(m === 'training'){
+          if(mode !== 'training'){
+            mode = 'training';
+            renderModeMenu();
+            populateChatSenders();
+          }
           openPuzzleSelector();
           return;
         }
         trainingActive = false;
         currentPuzzle = null;
+        document.getElementById('puzzle-selector-panel').classList.remove('show');
         if(mode===m) return;
         mode = m;
         renderModeMenu();
