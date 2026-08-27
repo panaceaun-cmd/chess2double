@@ -3969,12 +3969,19 @@
         lines += '<path d="M' + l[0][0].toFixed(4)+' '+Y(l[0][1]).toFixed(4) +
                  'L' + l[1][0].toFixed(4)+' '+Y(l[1][1]).toFixed(4) + '"/>';
       }
+      // A width of zero means no contour anywhere — the piece becomes a plain
+      // solid silhouette. The collar lines are drawn with the same pen, so they
+      // go too; leaving them behind would look like a stray scratch.
+      const outlined = sw > 0.0005;
+      const bodyG = outlined
+        ? '<g fill="'+fill+'" stroke="'+stroke+'" stroke-width="'+sw.toFixed(4)+'" stroke-linejoin="round" stroke-linecap="round">' + body + '</g>'
+        : '<g fill="'+fill+'" stroke="none">' + body + '</g>';
+      const lineG = outlined
+        ? '<g fill="none" stroke="'+stroke+'" stroke-width="'+(sw*0.8).toFixed(4)+'" stroke-linecap="round">' + lines + '</g>'
+        : '';
       return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="' +
         vbX.toFixed(4)+' 0 '+vbW.toFixed(4)+' '+vbH.toFixed(4)+'">' +
-        '<g fill="'+fill+'" stroke="'+stroke+'" stroke-width="'+sw+'" ' +
-        'stroke-linejoin="round" stroke-linecap="round">' + body + '</g>' +
-        '<g fill="none" stroke="'+stroke+'" stroke-width="'+(sw*0.8).toFixed(4)+'" ' +
-        'stroke-linecap="round">' + lines + '</g></svg>';
+        bodyG + lineG + '</svg>';
     }
 
     return { svgFor, shapesFor };
@@ -4015,7 +4022,9 @@
       .getPropertyValue('--accent-' + CSSCOLOR[colorKey]) || '').trim() || DEFAULT_ACCENT[colorKey];
     // the shared outline control drives the contour here too
     const stroke = outline3dColor;
-    const sw = Math.max(0.004, (outline3dWidth / 8) * 0.05);
+    // slider 0..8 maps straight onto the SVG pen; 0 stays 0 so the outline
+    // can actually be switched off, same as it can for the 3D models
+    const sw = (outline3dWidth / 8) * 0.05;
     const key = type + '|' + fill + '|' + stroke + '|' + sw.toFixed(4);
     if(pieceVecCache[key]) return pieceVecCache[key];
     let url = '';
