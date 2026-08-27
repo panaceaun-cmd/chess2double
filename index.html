@@ -500,9 +500,9 @@
     border-radius:14px;
     background:linear-gradient(100deg,
       transparent 32%,
-      rgba(255,232,170,.13) 44%,
-      rgba(255,252,235,.22) 50%,
-      rgba(255,232,170,.13) 56%,
+      rgba(255,232,170,.07) 44%,
+      rgba(255,252,235,.12) 50%,
+      rgba(255,232,170,.07) 56%,
       transparent 68%);
     background-size:280% 100%;
     mix-blend-mode:soft-light;
@@ -548,15 +548,16 @@
     position:absolute; inset:0;
     pointer-events:none;
     background:
-      linear-gradient(135deg, rgba(255,255,255,.30) 0%, rgba(255,248,225,.10) 34%, transparent 58%),
-      linear-gradient(0deg, rgba(60,30,0,.20), transparent 52%);
-    box-shadow:inset 0 0 0 1px rgba(255,226,160,.11);
+      linear-gradient(135deg, rgba(255,255,255,.11) 0%, rgba(255,248,225,.04) 34%, transparent 56%),
+      linear-gradient(0deg, rgba(40,20,0,.09), transparent 50%);
+    box-shadow:inset 0 0 0 1px rgba(255,226,160,.06);
   }
   #board.board3d .piece{
     transform:rotateX(var(--piece-stand));
     transform-origin:50% 100%;
     filter:
-      drop-shadow(0 1px 1px rgba(0,0,0,.5))
+      drop-shadow(0 0 1px rgba(0,0,0,.95))
+      drop-shadow(0 1px 1px rgba(0,0,0,.55))
       drop-shadow(0 10px 7px rgba(0,0,0,.45));
   }
   #board.board3d .piece.face-far{ transform:rotateX(var(--piece-stand)) rotate(180deg); }
@@ -615,7 +616,13 @@
     color:transparent;
     -webkit-text-stroke:0;
     font-size:0;
-    filter:drop-shadow(0 2px 3px rgba(0,0,0,.45));
+    /* A tight dark halo traces the silhouette, which separates a piece from
+       the square underneath it whatever board theme is chosen; the softer
+       shadow below it grounds the piece. */
+    filter:
+      drop-shadow(0 0 1px rgba(0,0,0,.95))
+      drop-shadow(0 1px 2px rgba(0,0,0,.65))
+      drop-shadow(0 3px 5px rgba(0,0,0,.42));
   }
   /* A model turned to face the other player is mirrored, never flipped
      upside down the way a flat glyph is. */
@@ -3545,6 +3552,11 @@
            crownY:0.908, crownR:0.226, headScale:1.05, headLift:0.020 }
     };
 
+    // Every piece is stretched this much vertically. Applied to the finished
+    // mesh so both style sets pick it up from one place, and REF_H below is
+    // multiplied by the same number — without that, the shared fit-to-canvas
+    // scale would just shrink everything back and cancel the stretch out.
+    const Y_STRETCH = 1.2;
     const SEGMENTS = 40;
     const PROFILE_SUB = 3;   // spline subdivisions per profile segment
 
@@ -3591,6 +3603,9 @@
               Math.cos(a)*trim.crownR, trim.crownY, Math.sin(a)*trim.crownR));
           }
         }
+      }
+      if(Y_STRETCH !== 1){
+        for(const p of mesh.v) p[1] *= Y_STRETCH;
       }
       return mesh;
     }
@@ -3654,7 +3669,7 @@
       // that makes a chess set readable at a glance. REF_W / REF_H are the
       // widest and tallest piece in the set (the king), so every other piece
       // lands proportionally smaller — exactly as on a real board.
-      const REF_W = 0.80, REF_H = 1.10;
+      const REF_W = 0.80, REF_H = 1.10 * Y_STRETCH;
       const scale = Math.min((cw - pad*2)/REF_W, (ch - pad*2)/REF_H);
 
       const ox = cw/2 - ((minX+maxX)/2)*scale;
@@ -3744,7 +3759,9 @@
   // once and cached as a data URL, so the board only ever draws images. The
   // sprite is rendered at a fixed resolution and scaled by CSS, which means
   // changing the board size costs nothing.
-  const PIECE3D_RES = 168;
+  // Sprites are rendered well above their on-screen size so that downscaling
+  // keeps the edges crisp on high-density screens instead of going soft.
+  const PIECE3D_RES = 240;
   let piece3dCache = {};
   // Which 3D model set to draw: style 12 uses the second, glossier variant.
   // Style 11/12 pick the models explicitly; the 3D board view also uses them
