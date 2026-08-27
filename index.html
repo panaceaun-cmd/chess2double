@@ -577,6 +577,11 @@
   /* A model that has been turned to face the other player is mirrored, not
      flipped upside down like a flat glyph would be. */
   #board.board3d .piece.piece3d.face-far{ transform:rotateX(var(--piece-stand)) scaleX(-1); }
+  /* Models carry their own contour, so they need only a tight contact
+     shadow — the wide soft glow used for glyphs blurs their edges. */
+  #board.board3d .piece.piece3d{
+    filter:drop-shadow(0 2px 2px rgba(0,0,0,.55)) drop-shadow(0 7px 5px rgba(0,0,0,.32));
+  }
   /* Explicit stacking inside the board: squares sit at the bottom, then the
      seam medallion, then the pieces. Without this the medallion would land
      either behind every square or in front of every piece, because squares
@@ -619,10 +624,7 @@
     /* A tight dark halo traces the silhouette, which separates a piece from
        the square underneath it whatever board theme is chosen; the softer
        shadow below it grounds the piece. */
-    filter:
-      drop-shadow(0 0 1px rgba(0,0,0,.95))
-      drop-shadow(0 1px 2px rgba(0,0,0,.65))
-      drop-shadow(0 3px 5px rgba(0,0,0,.42));
+    filter:drop-shadow(0 1px 2px rgba(0,0,0,.55));
   }
   /* A model turned to face the other player is mirrored, never flipped
      upside down the way a flat glyph is. */
@@ -3558,7 +3560,7 @@
     // scale would just shrink everything back and cancel the stretch out.
     const Y_STRETCH = 1.2;
     const SEGMENTS = 40;
-    const PROFILE_SUB = 3;   // spline subdivisions per profile segment
+    const PROFILE_SUB = 6;   // spline subdivisions per profile segment
 
     // The game identifies piece types with uppercase letters (K/Q/R/B/N/P)
     // while the profile table below is keyed lowercase — normalise here so
@@ -3571,8 +3573,8 @@
       const table = (v === 2) ? PROFILES_V2 : PROFILES;
       if(!table[type]) throw new Error('Piece3D: unknown piece type "' + rawType + '"');
       const trim = TRIM[v];
-      const sub = (v === 2) ? 4 : PROFILE_SUB;      // style 2 is rendered finer
-      const seg = (v === 2) ? 56 : SEGMENTS;
+      const sub = (v === 2) ? 8 : PROFILE_SUB;      // style 2 is rendered finer
+      const seg = (v === 2) ? 72 : 56;
       let mesh;
       if(type === 'n'){
         mesh = lathe(smoothPath(table.n, sub, false), seg);
@@ -3687,6 +3689,39 @@
         return { i, z: (a[2]+b[2]+c[2])/3 };
       }).sort((p,q)=>p.z-q.z);
 
+      // ---- outline pass ----
+      // Draw the whole silhouette once, expanded a few pixels outward from the
+      // piece's centre, in a contrasting colour. The shaded pass then covers
+      // the interior and leaves a clean contour. This is what stops the pieces
+      // from melting into the board: shading alone gives no hard edge, so a
+      // pale piece on a pale square (or a dark one on a dark square) loses its
+      // outline entirely and reads as a blur.
+      let scx = 0, scy = 0;
+      for(const p of pv){ scx += sx(p); scy += sy(p); }
+      scx /= pv.length; scy /= pv.length;
+      const outlinePx = Math.max(1.2, cw * 0.020);
+      // A dark contour reads well on light pieces but vanishes on black ones,
+      // so pick the direction that actually contrasts with the piece itself.
+      const lum = (base[0]*0.299 + base[1]*0.587 + base[2]*0.114) / 255;
+      const oc = lum < 0.30
+        ? [Math.min(255, base[0]+64), Math.min(255, base[1]+64), Math.min(255, base[2]+64)]
+        : [base[0]*0.16, base[1]*0.16, base[2]*0.16];
+      ctx.fillStyle = 'rgb(' + (oc[0]|0) + ',' + (oc[1]|0) + ',' + (oc[2]|0) + ')';
+      for(const tri of mesh.t){
+        ctx.beginPath();
+        for(let k=0;k<3;k++){
+          const p = pv[tri[k]];
+          let px = sx(p), py = sy(p);
+          const dx = px - scx, dy = py - scy;
+          const len = Math.hypot(dx, dy) || 1;
+          px += (dx/len) * outlinePx;
+          py += (dy/len) * outlinePx;
+          if(k===0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fill();
+      }
+
       for(const item of order){
         const tri = mesh.t[item.i];
         const a=pv[tri[0]], b=pv[tri[1]], c=pv[tri[2]];
@@ -3724,8 +3759,8 @@
         const sweep = (v === 2)
           ? (0.58 + 0.70*Math.pow(hN, 0.75))   // darkest at the foot, brightening upward
           : (0.74 + 0.52*hN + 0.10*Math.sin(hN*Math.PI*2.4));
-        const amb = (v === 2) ? 0.34 : 0.30;
-        const k = (amb + diff*0.70 + fill) * sweep;
+        const amb = (v === 2) ? 0.28 : 0.24;   // lower fill = deeper shadows, crisper form
+        const k = (amb + diff*0.86 + fill) * sweep;
 
         const r = Math.min(255, base[0]*k + spec*255 + rim*RIM[0]);
         const g = Math.min(255, base[1]*k + spec*255 + rim*RIM[1]);
@@ -3761,7 +3796,9 @@
   // changing the board size costs nothing.
   // Sprites are rendered well above their on-screen size so that downscaling
   // keeps the edges crisp on high-density screens instead of going soft.
-  const PIECE3D_RES = 240;
+  // Rendered well above the on-screen square size so pieces stay crisp on
+  // high-density displays instead of being upscaled from a small bitmap.
+  const PIECE3D_RES = 320;
   let piece3dCache = {};
   // Which 3D model set to draw: style 12 uses the second, glossier variant.
   // Style 11/12 pick the models explicitly; the 3D board view also uses them
@@ -3846,6 +3883,21 @@
     if(sel) sel.value = view3D ? '3d' : '2d';
     if(save){
       try{ localStorage.setItem('chess2-view-3d', view3D ? '1' : '0'); }catch(e){}
+      // The beige-and-brown board is the intended look for 3D, so apply it the
+      // first time 3D is switched on. Only once: after that the player's own
+      // theme choice stands, whatever it is.
+      if(view3D){
+        let alreadyDefaulted = false;
+        try{ alreadyDefaulted = localStorage.getItem('chess2-theme-3d-set') === '1'; }catch(e){}
+        if(!alreadyDefaulted){
+          boardTheme = 'beige-brown';
+          try{
+            localStorage.setItem('chess2-theme', boardTheme);
+            localStorage.setItem('chess2-theme-3d-set', '1');
+          }catch(e){}
+          populateBoardThemeSelect();
+        }
+      }
       // rebuild so pieces switch between glyphs and rendered models
       try{ render(); }catch(e){}
     }
