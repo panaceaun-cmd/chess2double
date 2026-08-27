@@ -48,15 +48,15 @@
     --wood-dark:#241812;
     --wood-mid:#3a2a1e;
     --panel:#2c1f17;
-    --game-bg-top:#3a281c;
-    --game-bg-mid:#241812;
-    --game-bg-outer:#180f0a;
+    --game-bg-top:#1d2a44;
+    --game-bg-mid:#0e1526;
+    --game-bg-outer:#05070d;
     --brass:#c9a24b;
     --brass-dim:#8a7038;
     --ink:#f2e9da;
     --ink-dim:#c9b99e;
-    --sq-light:#e9dcc3;
-    --sq-dark:#8a6244;
+    --sq-light:#f0dcae;
+    --sq-dark:#8d5f2e;
     --sq-light-half2:#e3d3ae;
     --sq-dark-half2:#7a5539;
     --accent-white:#fbf6ec;
@@ -76,6 +76,7 @@
   html,body{margin:0;padding:0; max-width:100%; overflow-x:hidden;}
   body{
     background:
+      radial-gradient(ellipse 70% 42% at 50% 30%, rgba(214,164,62,.22), transparent 70%),
       radial-gradient(ellipse at top, var(--game-bg-top) 0%, var(--game-bg-mid) 55%, var(--game-bg-outer) 100%);
     color:var(--ink);
     font-family:'Inter',sans-serif;
@@ -388,12 +389,59 @@
   h1{
     font-family:'Cinzel',serif;
     font-weight:700;
-    letter-spacing:.06em;
-    font-size:clamp(18px,4.5vw,26px);
-    margin:6px 0 2px;
-    color:var(--brass);
+    letter-spacing:.07em;
+    font-size:clamp(22px,6vw,44px);
+    margin:10px auto 4px;
     text-align:center;
-    text-shadow:0 2px 10px rgba(0,0,0,.5);
+    /* dark plaque with a brass edge, the way the title sits on the artwork */
+    display:block;
+    width:fit-content;
+    max-width:96%;
+    padding:.28em .85em .34em;
+    border:2px solid var(--brass);
+    border-radius:10px;
+    background:linear-gradient(180deg,#171008 0%,#0b0704 55%,#150e07 100%);
+    box-shadow:
+      0 0 0 1px rgba(0,0,0,.9),
+      0 8px 26px rgba(0,0,0,.6),
+      0 0 34px rgba(201,162,75,.28),
+      inset 0 1px 0 rgba(255,225,160,.25);
+    /* the letters themselves are a polished-gold gradient */
+    background-clip:padding-box;
+    position:relative;
+  }
+  #game-title{
+    color:transparent;
+    background-image:linear-gradient(
+      100deg,
+      #d8a63a 0%, #b8801d 12%, #f7d873 24%, #fff8dc 32%, #ffffff 36%,
+      #fff3c4 40%, #f2cf72 50%, #e0aa33 62%, #b8801d 74%, #f7d873 88%, #d8a63a 100%);
+    /* the gradient is wider than the text so it can be slid across it */
+    background-size:260% 100%;
+    background-position:0% 50%;
+    -webkit-background-clip:text;
+    background-clip:text;
+    -webkit-text-fill-color:transparent;
+    filter:drop-shadow(0 2px 1px rgba(0,0,0,.85)) drop-shadow(0 0 12px rgba(233,190,96,.45));
+    animation:titleShimmer 6.5s linear infinite;
+  }
+  /* the highlight band travelling across the letters */
+  @keyframes titleShimmer{
+    0%{ background-position:0% 50%; }
+    100%{ background-position:-260% 50%; }
+  }
+  /* Respect a system-level request for reduced motion: the gold stays, the
+     travelling highlight stops. */
+  @media (prefers-reduced-motion: reduce){
+    #game-title{ animation:none; }
+  }
+  /* the plaque keeps its dark fill even though the text is clipped to it */
+  #game-title::before{
+    content:'';
+    position:absolute; inset:0;
+    border-radius:8px;
+    background:linear-gradient(180deg,#171008 0%,#0b0704 55%,#150e07 100%);
+    z-index:-1;
   }
   .subtitle{
     font-size:12px;
@@ -426,10 +474,15 @@
     overflow-x:auto;
     padding:clamp(6px, calc(var(--sq) * .35), 36px);
     padding-top:calc(clamp(6px, calc(var(--sq) * .35), 36px) + 40px);
-    background:linear-gradient(160deg,#1c130d,#0f0906);
+    background:
+      radial-gradient(ellipse at 50% 0%, rgba(201,162,75,.20), transparent 60%),
+      linear-gradient(160deg,#1a1208,#0b0805);
     border-radius:14px;
-    border:clamp(1px, calc(var(--sq) * .05), 6px) solid var(--brass-dim);
-    box-shadow:0 12px 34px rgba(0,0,0,.55), inset 0 0 30px rgba(0,0,0,.5);
+    border:clamp(1px, calc(var(--sq) * .05), 6px) solid var(--brass);
+    box-shadow:
+      0 12px 34px rgba(0,0,0,.6),
+      0 0 46px rgba(201,162,75,.20),
+      inset 0 0 30px rgba(0,0,0,.55);
     position:relative;
     display:flex;
     flex-direction:column;
@@ -450,6 +503,39 @@
     background:
       radial-gradient(ellipse at 50% 0%, rgba(201,162,75,.16), transparent 62%),
       linear-gradient(160deg,#1c130d,#0f0906);
+    animation:boardGlow 7.5s ease-in-out infinite;
+  }
+  /* One travelling highlight laid over the whole scene, so the board and
+     every piece catch the same moving light. This is deliberately a single
+     overlay rather than an animation on each piece: `.piece` already uses
+     the `animation` property for the capture kick and the falling ghost, and
+     a second animation there would override those outright. */
+  #board-wrap.view-3d::after{
+    content:'';
+    position:absolute; inset:0;
+    pointer-events:none;
+    z-index:40;
+    border-radius:14px;
+    background:linear-gradient(100deg,
+      transparent 32%,
+      rgba(255,232,170,.13) 44%,
+      rgba(255,252,235,.22) 50%,
+      rgba(255,232,170,.13) 56%,
+      transparent 68%);
+    background-size:280% 100%;
+    mix-blend-mode:soft-light;
+    animation:sceneSheen 7.5s linear infinite;
+  }
+  @keyframes sceneSheen{
+    0%{ background-position:140% 50%; }
+    100%{ background-position:-140% 50%; }
+  }
+  @keyframes boardGlow{
+    0%,100%{ box-shadow:0 12px 34px rgba(0,0,0,.55), inset 0 0 30px rgba(0,0,0,.5), 0 0 28px rgba(201,162,75,.20); }
+    50%    { box-shadow:0 12px 34px rgba(0,0,0,.55), inset 0 0 30px rgba(0,0,0,.5), 0 0 46px rgba(233,190,96,.42); }
+  }
+  @media (prefers-reduced-motion: reduce){
+    #board-wrap.view-3d, #board-wrap.view-3d::after{ animation:none; }
   }
   #board.board3d{
     --board-tilt:45deg;
@@ -467,6 +553,18 @@
      the counter-rotation that stands pieces up has to invert with it. */
   #board.board3d.flip180{ --piece-stand:var(--board-tilt); }
   #board.board3d .sq{ transform-style:preserve-3d; }
+  /* Lacquered finish on the squares: a soft diagonal gloss plus a warm inner
+     edge, so the board reads as polished rather than flat colour. Painted as
+     a pseudo-element so it layers over whichever theme palette is active. */
+  #board.board3d .sq::before{
+    content:'';
+    position:absolute; inset:0;
+    pointer-events:none;
+    background:
+      linear-gradient(135deg, rgba(255,255,255,.16) 0%, rgba(255,255,255,.04) 38%, transparent 60%),
+      linear-gradient(0deg, rgba(0,0,0,.16), transparent 55%);
+    box-shadow:inset 0 0 0 1px rgba(255,226,160,.07);
+  }
   #board.board3d .piece{
     transform:rotateX(var(--piece-stand));
     transform-origin:50% 100%;
@@ -1887,7 +1985,7 @@
         <div class="settings-row">
           <span id="game-bg-color-label">🎨 Цвет фона игры</span>
         </div>
-        <div class="color-picker-row"><input type="color" id="game-bg-color" value="#241812"></div>
+        <div class="color-picker-row"><input type="color" id="game-bg-color" value="#0e1526"></div>
         <button class="btn secondary" id="game-bg-color-reset">↺ Фон по умолчанию</button>
 
         <div class="settings-row">
@@ -3131,6 +3229,45 @@
       return m;
     }
 
+    // Ear-clipping triangulation. A centroid fan is only valid for star-shaped
+    // outlines, and the knight's head is not one — its ear spikes and the
+    // notch between them would produce triangles lying outside the silhouette.
+    // This handles any simple polygon correctly.
+    function triangulate(poly){
+      const n = poly.length;
+      const area2 = (a,b,c)=> (b[0]-a[0])*(c[1]-a[1]) - (b[1]-a[1])*(c[0]-a[0]);
+      let signed = 0;
+      for(let i=0;i<n;i++){ const j=(i+1)%n; signed += poly[i][0]*poly[j][1] - poly[j][0]*poly[i][1]; }
+      const ccw = signed > 0;
+      const idx = [];
+      for(let i=0;i<n;i++) idx.push(i);
+      if(!ccw) idx.reverse();
+      const tris = [];
+      let guard = 0;
+      while(idx.length > 3 && guard++ < 5000){
+        let clipped = false;
+        for(let k=0;k<idx.length;k++){
+          const i0 = idx[(k+idx.length-1)%idx.length], i1 = idx[k], i2 = idx[(k+1)%idx.length];
+          const a = poly[i0], b = poly[i1], c = poly[i2];
+          if(area2(a,b,c) <= 0) continue;              // reflex corner, not an ear
+          let contains = false;
+          for(const m of idx){
+            if(m===i0||m===i1||m===i2) continue;
+            const p = poly[m];
+            if(area2(a,b,p)>=0 && area2(b,c,p)>=0 && area2(c,a,p)>=0){ contains = true; break; }
+          }
+          if(contains) continue;                        // another vertex inside, not an ear
+          tris.push([i0,i1,i2]);
+          idx.splice(k,1);
+          clipped = true;
+          break;
+        }
+        if(!clipped) break;                             // degenerate input — bail out safely
+      }
+      if(idx.length === 3) tris.push([idx[0],idx[1],idx[2]]);
+      return tris;
+    }
+
     // Extrude a closed 2D silhouette along Z — a real solid with front,
     // back and side walls (used for the knight's head, which is the one
     // piece that is not a solid of revolution).
@@ -3139,17 +3276,13 @@
       const n = poly.length;
       for(const [x,y] of poly) m.v.push([x, y,  depth]);
       for(const [x,y] of poly) m.v.push([x, y, -depth]);
-      // fan-triangulate both faces (silhouettes here are star-shaped about
-      // their centroid, which makes a fan valid and cheap)
-      let cx=0, cy=0;
-      for(const [x,y] of poly){ cx+=x; cy+=y; }
-      cx/=n; cy/=n;
-      const cFront = m.v.length; m.v.push([cx, cy,  depth]);
-      const cBack  = m.v.length; m.v.push([cx, cy, -depth]);
+      const faces = triangulate(poly);
+      for(const [a,b,c] of faces){
+        m.t.push([a, b, c]);
+        m.t.push([n+c, n+b, n+a]);
+      }
       for(let i=0;i<n;i++){
         const j=(i+1)%n;
-        m.t.push([cFront, i, j]);
-        m.t.push([cBack, n+j, n+i]);
         m.t.push([i, n+i, n+j]);
         m.t.push([i, n+j, j]);
       }
@@ -3212,12 +3345,36 @@
       ]
     };
 
-    // knight head silhouette (x = forward/muzzle, y = up), extruded in Z
+    // Knight head silhouette, facing +x. Drawn as a real horse head: muzzle,
+    // nostril, cheek, brow, two ears with the notch between them, and a maned
+    // neck sweeping down the back. Extruded in Z into a solid.
     const KNIGHT_HEAD = [
-      [-0.075,0.215],[0.115,0.215],[0.135,0.300],[0.170,0.395],[0.205,0.470],
-      [0.222,0.545],[0.196,0.606],[0.088,0.652],[0.010,0.688],[-0.046,0.716],
-      [-0.074,0.760],[-0.104,0.712],[-0.150,0.702],[-0.168,0.648],[-0.132,0.586],
-      [-0.148,0.505],[-0.184,0.425],[-0.186,0.330],[-0.150,0.252],[-0.112,0.220]
+      [ 0.100, 0.205],   // front base of the neck, on the pedestal
+      [ 0.150, 0.285],   // chest
+      [ 0.182, 0.375],
+      [ 0.205, 0.452],   // throat
+      [ 0.245, 0.520],   // underside of the jaw
+      [ 0.302, 0.566],   // muzzle, lower front
+      [ 0.330, 0.612],   // nose tip
+      [ 0.312, 0.652],   // nostril
+      [ 0.262, 0.664],
+      [ 0.198, 0.672],   // dip on the bridge of the nose
+      [ 0.140, 0.690],
+      [ 0.086, 0.722],   // forehead
+      [ 0.046, 0.766],   // brow
+      [ 0.052, 0.812],   // front ear, leading edge
+      [ 0.074, 0.892],   // FRONT EAR TIP
+      [ 0.016, 0.836],   // notch between the ears
+      [-0.032, 0.900],   // BACK EAR TIP
+      [-0.070, 0.826],   // back ear, trailing edge
+      [-0.104, 0.782],   // poll
+      [-0.146, 0.736],   // top of the mane
+      [-0.176, 0.660],
+      [-0.196, 0.566],   // mane down the neck
+      [-0.208, 0.462],
+      [-0.206, 0.362],
+      [-0.190, 0.276],
+      [-0.150, 0.212]    // back base of the neck
     ];
 
     const SEGMENTS = 44;
@@ -3233,7 +3390,7 @@
       let mesh;
       if(type === 'n'){
         mesh = lathe(PROFILES.n, SEGMENTS);
-        addMesh(mesh, extrude(KNIGHT_HEAD, 0.105));
+        addMesh(mesh, extrude(KNIGHT_HEAD, 0.118));
       } else {
         mesh = lathe(PROFILES[type], SEGMENTS);
         if(type === 'r'){
@@ -3276,11 +3433,10 @@
     }
 
     const ELEV = 15 * Math.PI/180;   // camera looks slightly down on the piece
-    const LIGHT = (function(){
-      const l = [-0.42, 0.78, 0.86];
-      const len = Math.hypot(l[0], l[1], l[2]);
-      return [l[0]/len, l[1]/len, l[2]/len];
-    })();
+    function norm3(v){ const l=Math.hypot(v[0],v[1],v[2])||1; return [v[0]/l,v[1]/l,v[2]/l]; }
+    const LIGHT = norm3([-0.42, 0.78, 0.86]);   // warm key light, upper left
+    const FILL  = norm3([ 0.72, 0.16, 0.42]);   // cool fill from the right
+    const RIM   = [255, 236, 190];              // warm rim colour
 
     function project(p){
       const ce = Math.cos(ELEV), se = Math.sin(ELEV);
@@ -3354,13 +3510,24 @@
         let hx=LIGHT[0], hy=LIGHT[1], hz=LIGHT[2]+1;
         const hl = Math.hypot(hx,hy,hz) || 1;
         hx/=hl; hy/=hl; hz/=hl;
-        const spec = Math.pow(Math.max(0, nx*hx+ny*hy+nz*hz), 26) * 0.55;
-        const amb = 0.34;
-        const k = amb + diff*0.72;
+        const spec = Math.pow(Math.max(0, nx*hx+ny*hy+nz*hz), 34) * 0.85;
+        // Cool fill light from the opposite side. A single warm key light
+        // reads as plastic; a second, dimmer light of a different colour is
+        // what makes a surface look like polished metal.
+        const fill = Math.max(0, nx*FILL[0] + ny*FILL[1] + nz*FILL[2]) * 0.30;
+        // Fresnel rim: grazing faces catch the light, giving the bright edge
+        // that runs around a metal piece.
+        const rim = Math.pow(1 - Math.min(1, nz), 3.2) * 0.42;
+        // Vertical gradient sweep — the "shimmer". Metal is darker at the
+        // base and brightens toward the top where it faces the sky.
+        const hN = Math.max(0, Math.min(1, ((a[1]+b[1]+c[1])/3 - minY) / Math.max(1e-6, maxY-minY)));
+        const sweep = 0.74 + 0.52*hN + 0.10*Math.sin(hN*Math.PI*2.4);
+        const amb = 0.30;
+        const k = (amb + diff*0.70 + fill) * sweep;
 
-        const r = Math.min(255, base[0]*k + spec*255);
-        const g = Math.min(255, base[1]*k + spec*255);
-        const bl= Math.min(255, base[2]*k + spec*255);
+        const r = Math.min(255, base[0]*k + spec*255 + rim*RIM[0]);
+        const g = Math.min(255, base[1]*k + spec*255 + rim*RIM[1]);
+        const bl= Math.min(255, base[2]*k + spec*255 + rim*RIM[2]);
         const col = 'rgb(' + (r|0) + ',' + (g|0) + ',' + (bl|0) + ')';
 
         ctx.beginPath();
@@ -3470,7 +3637,7 @@
 
   // ---- game background color (the page backdrop behind the board/panels,
   // distinct from the board-square theme) ----
-  const GAME_BG_DEFAULT = '#241812';
+  const GAME_BG_DEFAULT = '#0e1526';
   function shadeHex(hex, percent){
     // percent > 0 lightens toward white, percent < 0 darkens toward black
     const n = parseInt(hex.slice(1), 16);
