@@ -475,6 +475,23 @@
       drop-shadow(0 10px 7px rgba(0,0,0,.45));
   }
   #board.board3d .piece.face-far{ transform:rotateX(var(--piece-stand)) rotate(180deg); }
+  /* Real 3D models: the sprite is an image standing on the square, so it is
+     positioned absolutely and allowed to rise well above its own square —
+     a king overlaps the ranks behind it exactly like a physical piece. */
+  #board.board3d .piece.piece3d{
+    position:absolute; left:0; right:0; bottom:0;
+    height:190%;
+    background-repeat:no-repeat;
+    background-position:center bottom;
+    background-size:contain;
+    color:transparent;
+    -webkit-text-stroke:0;
+    font-size:0;
+  }
+  /* A model that has been turned to face the other player is mirrored, not
+     flipped upside down like a flat glyph would be. */
+  #board.board3d .piece.piece3d.face-far{ transform:rotateX(var(--piece-stand)) scaleX(-1); }
+  #board.board3d .piece.piece3d.captured-piece-ghost{ inset:auto 0 0 0; }
   /* the contact shadow that visually "sits" each piece on its square */
   #board.board3d .sq:has(> .piece)::after{
     content:''; position:absolute; left:18%; right:18%; bottom:10%; height:16%;
@@ -2929,6 +2946,9 @@
     if(input) input.value = hex;
     if(save){ try{ localStorage.setItem('chess2-color-' + colorKey, hex); }catch(e){} }
     roomPieceColors[colorKey] = hex;
+    // 3D pieces bake their colour into the rendered sprite, so the cache has
+    // to be dropped here — unlike glyphs, they do not follow the CSS var.
+    if(typeof invalidatePiece3D === 'function') invalidatePiece3D();
     pushStyleChangeIfOnline();
   }
   function applyColorName(colorKey, name, save){
@@ -3045,7 +3065,360 @@
       try{ localStorage.removeItem('chess2-color-' + colorKey); }catch(e){}
       applyColorName(colorKey, null, true);
     });
+    if(typeof invalidatePiece3D === 'function') invalidatePiece3D();
   });
+
+  // ============================================================
+  //  Real 3D chess piece models — no external library.
+  //  Geometry is genuine 3D: rotationally-symmetric pieces are built as
+  //  lathe (surface-of-revolution) solids from a profile curve, and the
+  //  knight's head is a true extruded mesh. Each piece is rasterized once
+  //  into an offscreen canvas with per-face lighting and cached as a
+  //  sprite, so the board just draws images and every existing piece
+  //  behaviour (clicks, move animation, capture animation) is untouched.
+  // ============================================================
+  const Piece3D = (function(){
+    'use strict';
+
+    // ---------- mesh helpers ----------
+    function emptyMesh(){ return { v: [], t: [] }; }
+
+    function addMesh(dst, src){
+      const off = dst.v.length;
+      for(const p of src.v) dst.v.push(p);
+      for(const tri of src.t) dst.t.push([tri[0]+off, tri[1]+off, tri[2]+off]);
+      return dst;
+    }
+
+    // Surface of revolution: spin a 2D profile (radius, height) around the
+    // Y axis. This is how real chess pieces are actually made on a lathe,
+    // so it produces genuinely correct silhouettes for every piece except
+    // the knight.
+    function lathe(profile, segments){
+      const m = emptyMesh();
+      const rings = [];
+      for(let i=0;i<profile.length;i++){
+        const [r, y] = profile[i];
+        const ring = [];
+        if(r <= 1e-6){
+          // degenerate ring (a pole) — one shared vertex
+          ring.push(m.v.length);
+          m.v.push([0, y, 0]);
+        } else {
+          for(let s=0;s<segments;s++){
+            const a = (s / segments) * Math.PI * 2;
+            ring.push(m.v.length);
+            m.v.push([Math.cos(a)*r, y, Math.sin(a)*r]);
+          }
+        }
+        rings.push(ring);
+      }
+      for(let i=0;i<rings.length-1;i++){
+        const a = rings[i], b = rings[i+1];
+        if(a.length === 1 && b.length === 1) continue;
+        if(a.length === 1){
+          for(let s=0;s<b.length;s++) m.t.push([a[0], b[s], b[(s+1)%b.length]]);
+        } else if(b.length === 1){
+          for(let s=0;s<a.length;s++) m.t.push([a[s], a[(s+1)%a.length], b[0]]);
+        } else {
+          for(let s=0;s<a.length;s++){
+            const s2 = (s+1)%a.length;
+            m.t.push([a[s], a[s2], b[s2]]);
+            m.t.push([a[s], b[s2], b[s]]);
+          }
+        }
+      }
+      return m;
+    }
+
+    // Extrude a closed 2D silhouette along Z — a real solid with front,
+    // back and side walls (used for the knight's head, which is the one
+    // piece that is not a solid of revolution).
+    function extrude(poly, depth){
+      const m = emptyMesh();
+      const n = poly.length;
+      for(const [x,y] of poly) m.v.push([x, y,  depth]);
+      for(const [x,y] of poly) m.v.push([x, y, -depth]);
+      // fan-triangulate both faces (silhouettes here are star-shaped about
+      // their centroid, which makes a fan valid and cheap)
+      let cx=0, cy=0;
+      for(const [x,y] of poly){ cx+=x; cy+=y; }
+      cx/=n; cy/=n;
+      const cFront = m.v.length; m.v.push([cx, cy,  depth]);
+      const cBack  = m.v.length; m.v.push([cx, cy, -depth]);
+      for(let i=0;i<n;i++){
+        const j=(i+1)%n;
+        m.t.push([cFront, i, j]);
+        m.t.push([cBack, n+j, n+i]);
+        m.t.push([i, n+i, n+j]);
+        m.t.push([i, n+j, j]);
+      }
+      return m;
+    }
+
+    function translated(mesh, dx, dy, dz){
+      return { v: mesh.v.map(p=>[p[0]+dx, p[1]+dy, p[2]+dz]), t: mesh.t.map(t=>t.slice()) };
+    }
+
+    function box(w, h, d, cx, cy, cz){
+      const hw=w/2, hh=h/2, hd=d/2;
+      const v = [
+        [-hw,-hh,-hd],[hw,-hh,-hd],[hw,hh,-hd],[-hw,hh,-hd],
+        [-hw,-hh, hd],[hw,-hh, hd],[hw,hh, hd],[-hw,hh, hd]
+      ].map(p=>[p[0]+cx, p[1]+cy, p[2]+cz]);
+      const t = [
+        [0,2,1],[0,3,2], [4,5,6],[4,6,7], [0,1,5],[0,5,4],
+        [3,7,6],[3,6,2], [0,4,7],[0,7,3], [1,2,6],[1,6,5]
+      ];
+      return { v, t };
+    }
+
+    // ---------- piece profiles (radius, height), 0 = board surface ----------
+    // Proportions follow a Staunton set: wide weighted base, narrow stem,
+    // distinct collar, characteristic head per rank.
+    const PROFILES = {
+      p: [ // pawn
+        [0.000,0.000],[0.300,0.000],[0.300,0.030],[0.270,0.055],[0.215,0.080],
+        [0.135,0.110],[0.108,0.200],[0.130,0.255],[0.190,0.290],[0.190,0.315],
+        [0.150,0.340],[0.118,0.362],[0.150,0.392],[0.176,0.450],[0.166,0.515],
+        [0.120,0.572],[0.052,0.612],[0.000,0.625]
+      ],
+      r: [ // rook (battlements added separately as real boxes)
+        [0.000,0.000],[0.330,0.000],[0.330,0.035],[0.300,0.062],[0.240,0.090],
+        [0.196,0.130],[0.186,0.300],[0.196,0.430],[0.232,0.470],[0.300,0.500],
+        [0.310,0.560],[0.300,0.610],[0.000,0.610]
+      ],
+      n: [ // knight pedestal only; head is an extruded mesh
+        [0.000,0.000],[0.330,0.000],[0.330,0.035],[0.300,0.062],[0.240,0.090],
+        [0.190,0.130],[0.180,0.200],[0.196,0.235],[0.000,0.245]
+      ],
+      b: [ // bishop
+        [0.000,0.000],[0.330,0.000],[0.330,0.035],[0.300,0.062],[0.240,0.090],
+        [0.150,0.130],[0.126,0.260],[0.150,0.320],[0.220,0.360],[0.220,0.386],
+        [0.160,0.412],[0.130,0.440],[0.186,0.500],[0.205,0.580],[0.170,0.660],
+        [0.108,0.716],[0.062,0.742],[0.070,0.775],[0.052,0.800],[0.000,0.812]
+      ],
+      q: [ // queen
+        [0.000,0.000],[0.370,0.000],[0.370,0.040],[0.336,0.070],[0.268,0.100],
+        [0.166,0.150],[0.140,0.320],[0.168,0.400],[0.244,0.446],[0.244,0.474],
+        [0.180,0.502],[0.156,0.536],[0.222,0.610],[0.256,0.700],[0.236,0.760],
+        [0.196,0.786],[0.240,0.812],[0.246,0.842],[0.000,0.852]
+      ],
+      k: [ // king (cross added separately as real boxes)
+        [0.000,0.000],[0.380,0.000],[0.380,0.042],[0.344,0.074],[0.274,0.106],
+        [0.170,0.158],[0.144,0.340],[0.172,0.424],[0.250,0.472],[0.250,0.500],
+        [0.184,0.530],[0.160,0.566],[0.228,0.646],[0.264,0.742],[0.244,0.806],
+        [0.206,0.836],[0.252,0.862],[0.258,0.892],[0.000,0.900]
+      ]
+    };
+
+    // knight head silhouette (x = forward/muzzle, y = up), extruded in Z
+    const KNIGHT_HEAD = [
+      [-0.075,0.215],[0.115,0.215],[0.135,0.300],[0.170,0.395],[0.205,0.470],
+      [0.222,0.545],[0.196,0.606],[0.088,0.652],[0.010,0.688],[-0.046,0.716],
+      [-0.074,0.760],[-0.104,0.712],[-0.150,0.702],[-0.168,0.648],[-0.132,0.586],
+      [-0.148,0.505],[-0.184,0.425],[-0.186,0.330],[-0.150,0.252],[-0.112,0.220]
+    ];
+
+    const SEGMENTS = 44;
+
+    // The game identifies piece types with uppercase letters (K/Q/R/B/N/P)
+    // while the profile table below is keyed lowercase — normalise here so
+    // either spelling works and a mismatch can never silently fall back.
+    function normType(type){ return String(type == null ? '' : type).toLowerCase(); }
+
+    function buildMesh(rawType){
+      const type = normType(rawType);
+      if(!PROFILES[type]) throw new Error('Piece3D: unknown piece type "' + rawType + '"');
+      let mesh;
+      if(type === 'n'){
+        mesh = lathe(PROFILES.n, SEGMENTS);
+        addMesh(mesh, extrude(KNIGHT_HEAD, 0.105));
+      } else {
+        mesh = lathe(PROFILES[type], SEGMENTS);
+        if(type === 'r'){
+          // four real battlement blocks around the rim
+          for(let i=0;i<4;i++){
+            const a = (i/4)*Math.PI*2 + Math.PI/4;
+            const rr = 0.245;
+            addMesh(mesh, box(0.135,0.105,0.135, Math.cos(a)*rr, 0.660, Math.sin(a)*rr));
+          }
+        } else if(type === 'k'){
+          addMesh(mesh, box(0.072,0.190,0.070, 0, 0.985, 0));
+          addMesh(mesh, box(0.170,0.068,0.070, 0, 1.030, 0));
+        } else if(type === 'q'){
+          // crown points around the coronet
+          for(let i=0;i<7;i++){
+            const a = (i/7)*Math.PI*2;
+            const rr = 0.216;
+            addMesh(mesh, box(0.062,0.078,0.062, Math.cos(a)*rr, 0.884, Math.sin(a)*rr));
+          }
+        }
+      }
+      return mesh;
+    }
+
+    const meshCache = {};
+    function getMesh(rawType){
+      const type = normType(rawType);
+      if(!meshCache[type]) meshCache[type] = buildMesh(type);
+      return meshCache[type];
+    }
+
+    // ---------- shading + rasterization ----------
+    function hexToRgb(hex){
+      let h = String(hex || '#cccccc').trim();
+      if(h[0] === '#') h = h.slice(1);
+      if(h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+      const n = parseInt(h, 16);
+      if(!isFinite(n)) return [200,200,200];
+      return [(n>>16)&255, (n>>8)&255, n&255];
+    }
+
+    const ELEV = 15 * Math.PI/180;   // camera looks slightly down on the piece
+    const LIGHT = (function(){
+      const l = [-0.42, 0.78, 0.86];
+      const len = Math.hypot(l[0], l[1], l[2]);
+      return [l[0]/len, l[1]/len, l[2]/len];
+    })();
+
+    function project(p){
+      const ce = Math.cos(ELEV), se = Math.sin(ELEV);
+      const y =  p[1]*ce - p[2]*se;
+      const z =  p[1]*se + p[2]*ce;
+      return [p[0], y, z];
+    }
+
+    // Renders one piece into a canvas and returns it. `size` is the pixel
+    // size of the square the piece will sit on.
+    function renderToCanvas(type, hex, size, makeCanvas){
+      const mesh = getMesh(type);
+      const base = hexToRgb(hex);
+
+      // project every vertex once
+      const pv = mesh.v.map(project);
+
+      // measure this piece's own projected silhouette
+      let minX=Infinity, maxX=-Infinity, minY=Infinity, maxY=-Infinity;
+      for(const p of pv){
+        if(p[0]<minX) minX=p[0]; if(p[0]>maxX) maxX=p[0];
+        if(p[1]<minY) minY=p[1]; if(p[1]>maxY) maxY=p[1];
+      }
+
+      // A piece is drawn up to ~1.9× the square size tall so a king towers
+      // over its square the way a real set does.
+      const cw = Math.max(8, Math.round(size));
+      const ch = Math.max(8, Math.round(size * 1.9));
+      const pad = cw * 0.06;
+
+      // IMPORTANT: the scale is shared by every piece type rather than fitted
+      // per-piece. Fitting each piece to the canvas individually would blow a
+      // pawn up to the same width as a king and destroy the size hierarchy
+      // that makes a chess set readable at a glance. REF_W / REF_H are the
+      // widest and tallest piece in the set (the king), so every other piece
+      // lands proportionally smaller — exactly as on a real board.
+      const REF_W = 0.80, REF_H = 1.10;
+      const scale = Math.min((cw - pad*2)/REF_W, (ch - pad*2)/REF_H);
+
+      const ox = cw/2 - ((minX+maxX)/2)*scale;
+
+      function sx(p){ return ox + p[0]*scale; }
+      function sy(p){ return ch - pad - (p[1]-minY)*scale; }
+
+      const canvas = makeCanvas(cw, ch);
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0,0,cw,ch);
+
+      // painter's algorithm: far faces first
+      const order = mesh.t.map((tri, i) => {
+        const a=pv[tri[0]], b=pv[tri[1]], c=pv[tri[2]];
+        return { i, z: (a[2]+b[2]+c[2])/3 };
+      }).sort((p,q)=>p.z-q.z);
+
+      for(const item of order){
+        const tri = mesh.t[item.i];
+        const a=pv[tri[0]], b=pv[tri[1]], c=pv[tri[2]];
+        // face normal in view space
+        let nx=(b[1]-a[1])*(c[2]-a[2])-(b[2]-a[2])*(c[1]-a[1]);
+        let ny=(b[2]-a[2])*(c[0]-a[0])-(b[0]-a[0])*(c[2]-a[2]);
+        let nz=(b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);
+        const nl = Math.hypot(nx,ny,nz);
+        if(!(nl > 1e-12)) continue;           // degenerate sliver
+        nx/=nl; ny/=nl; nz/=nl;
+        // two-sided shading: face the normal toward the camera so winding
+        // mistakes can never produce a black facet
+        if(nz < 0){ nx=-nx; ny=-ny; nz=-nz; }
+
+        const diff = Math.max(0, nx*LIGHT[0] + ny*LIGHT[1] + nz*LIGHT[2]);
+        // Blinn-style highlight (halfway vector against a camera at +Z)
+        let hx=LIGHT[0], hy=LIGHT[1], hz=LIGHT[2]+1;
+        const hl = Math.hypot(hx,hy,hz) || 1;
+        hx/=hl; hy/=hl; hz/=hl;
+        const spec = Math.pow(Math.max(0, nx*hx+ny*hy+nz*hz), 26) * 0.55;
+        const amb = 0.34;
+        const k = amb + diff*0.72;
+
+        const r = Math.min(255, base[0]*k + spec*255);
+        const g = Math.min(255, base[1]*k + spec*255);
+        const bl= Math.min(255, base[2]*k + spec*255);
+        const col = 'rgb(' + (r|0) + ',' + (g|0) + ',' + (bl|0) + ')';
+
+        ctx.beginPath();
+        ctx.moveTo(sx(a), sy(a));
+        ctx.lineTo(sx(b), sy(b));
+        ctx.lineTo(sx(c), sy(c));
+        ctx.closePath();
+        ctx.fillStyle = col;
+        ctx.fill();
+        // hairline stroke in the same colour closes the antialiasing seams
+        // that would otherwise show as a mesh of light lines across the piece
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 0.6;
+        ctx.stroke();
+      }
+      return canvas;
+    }
+
+    return {
+      getMesh, buildMesh, renderToCanvas, hexToRgb, project,
+      TYPES: ['k','q','r','b','n','p']
+    };
+  })();
+
+  // ---- 3D piece sprites ----
+  // Each (piece type × colour) is rasterized from its real 3D mesh exactly
+  // once and cached as a data URL, so the board only ever draws images. The
+  // sprite is rendered at a fixed resolution and scaled by CSS, which means
+  // changing the board size costs nothing.
+  const PIECE3D_RES = 168;
+  let piece3dCache = {};
+  function piece3dSprite(type, colorKey){
+    const hex = (getComputedStyle(document.documentElement)
+      .getPropertyValue('--accent-' + CSSCOLOR[colorKey]) || '').trim() || DEFAULT_ACCENT[colorKey];
+    const key = type + '|' + hex;
+    if(piece3dCache[key]) return piece3dCache[key];
+    let url = '';
+    try{
+      const canvas = Piece3D.renderToCanvas(type, hex, PIECE3D_RES, (w,h)=>{
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        return c;
+      });
+      url = canvas.toDataURL('image/png');
+    }catch(e){ return ''; }   // any failure falls back to the glyph rendering
+    piece3dCache[key] = url;
+    return url;
+  }
+  // Piece colours are edited with a live colour input that fires on every
+  // pointer move, so redrawing 6 meshes per event would stutter. Clear and
+  // rebuild once the user settles instead.
+  let piece3dRefreshTimer = null;
+  function invalidatePiece3D(){
+    piece3dCache = {};
+    if(!view3D) return;
+    clearTimeout(piece3dRefreshTimer);
+    piece3dRefreshTimer = setTimeout(()=>{ try{ render(); }catch(e){} }, 160);
+  }
 
   // ---- 2D / 3D board view ----
   // 3D is a pure rendering mode: the board plane is tilted via CSS 3D and
@@ -3060,13 +3433,19 @@
   // it out. Mirrors the .piece rules in the 3D CSS block above.
   function pieceBaseTransform(el){
     const parts = [];
+    const isModel = !!(el && el.classList.contains('piece3d'));
     if(view3D){
       // .flip180 inverts the board's local X axis, so the stand-up rotation
       // inverts with it — same rule as the --piece-stand CSS variable.
       const stand = isBoardCurrentlyFlipped() ? BOARD_TILT_3D : -BOARD_TILT_3D;
       parts.push('rotateX(' + stand + 'deg)');
     }
-    if(el && el.classList.contains('face-far')) parts.push('rotate(180deg)');
+    if(el && el.classList.contains('face-far')){
+      // A flat glyph is flipped 180° to "face" the opposite player, but a
+      // real 3D model must not be turned upside down — a physical piece
+      // that has been turned around is mirrored, not inverted.
+      parts.push(isModel ? 'scaleX(-1)' : 'rotate(180deg)');
+    }
     return parts.length ? ' ' + parts.join(' ') : '';
   }
   function applyViewMode(is3D, save){
@@ -3077,7 +3456,11 @@
     if(boardEl) boardEl.classList.toggle('board3d', view3D);
     const sel = document.getElementById('view-mode-select');
     if(sel) sel.value = view3D ? '3d' : '2d';
-    if(save){ try{ localStorage.setItem('chess2-view-3d', view3D ? '1' : '0'); }catch(e){} }
+    if(save){
+      try{ localStorage.setItem('chess2-view-3d', view3D ? '1' : '0'); }catch(e){}
+      // rebuild so pieces switch between glyphs and rendered models
+      try{ render(); }catch(e){}
+    }
   }
   (function initViewMode(){
     applyViewMode(view3D, false);
@@ -8318,6 +8701,17 @@
           span.className = 'piece ' + CSSCOLOR[piece.color] + ' pstyle-' + pieceStyle + (rotate?' face-far':'');
           span.textContent = GLYPH[piece.color][piece.type];
           span.dataset.glyph = GLYPH[piece.color][piece.type];
+          if(view3D){
+            const sprite = piece3dSprite(piece.type, piece.color);
+            if(sprite){
+              // Swap the glyph for the rendered model. The element, its
+              // classes and its position in the square all stay the same,
+              // so move/capture animations and hit-testing are unaffected.
+              span.classList.add('piece3d');
+              span.style.backgroundImage = 'url(' + sprite + ')';
+              span.textContent = '';
+            }
+          }
           sq.appendChild(span);
         }
 
@@ -8440,6 +8834,14 @@
     const ghost = document.createElement('span');
     ghost.className = 'piece captured-piece-ghost ' + CSSCOLOR[move.capturedColor] + (wasFaceFar ? ' face-far' : '');
     ghost.textContent = GLYPH[move.capturedColor][move.capturedType];
+    if(view3D){
+      const sprite = piece3dSprite(move.capturedType, move.capturedColor);
+      if(sprite){
+        ghost.classList.add('piece3d');
+        ghost.style.backgroundImage = 'url(' + sprite + ')';
+        ghost.textContent = '';
+      }
+    }
     ghost.style.animation = 'none'; // standing still — no fall yet
     parentSq.appendChild(ghost);
     return ghost;
