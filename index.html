@@ -3837,6 +3837,116 @@
   // Flat vector pieces built from the same lathe profiles the 3D models use:
   // a profile mirrored about its axis IS the classic Staunton silhouette, so
   // the 2D set matches the 3D one instead of being a separate drawing.
+  // Hand-drawn flat piece shapes, in world units: x centred on 0, y up from the
+  // baseline. Queen and king are crowns rather than turned profiles, which is
+  // what the classic printed diagram set looks like.
+  const SHAPES_2D = (function(){
+    function crown(tips, valleyY, bandTop, halfW){
+      // tips: [[x, y], ...] left to right
+      const pts = [[-halfW, bandTop]];
+      for(let i=0;i<tips.length;i++){
+        pts.push([tips[i][0], tips[i][1]]);
+        if(i < tips.length-1){
+          const vx = (tips[i][0] + tips[i+1][0]) / 2;
+          pts.push([vx, valleyY]);
+        }
+      }
+      pts.push([halfW, bandTop]);
+      return pts;
+    }
+
+    const QUEEN_TIPS = [[-0.40,0.60],[-0.20,0.66],[0,0.72],[0.20,0.66],[0.40,0.60]];
+    const KING_TIPS  = [[-0.40,0.58],[-0.20,0.64],[0,0.62],[0.20,0.64],[0.40,0.58]];
+
+    function band(halfW, y0, y1){
+      return [[-halfW,y0],[halfW,y0],[halfW,y1],[-halfW,y1]];
+    }
+
+    const S = {};
+
+    S.q = function(){
+      const body = crown(QUEEN_TIPS, 0.30, 0.16, 0.40);
+      const out = { body: body, extra: [band(0.44, 0.00, 0.16)], lines: [], circles: [] };
+      for(const [x,y] of QUEEN_TIPS) out.circles.push([x, y + 0.058, 0.082]);
+      out.lines.push([[-0.40,0.16],[0.40,0.16]]);
+      return out;
+    };
+
+    S.k = function(){
+      const body = crown(KING_TIPS, 0.30, 0.16, 0.40);
+      const out = { body: body, extra: [band(0.44, 0.00, 0.16)], lines: [], circles: [] };
+      // cross rising from the centre of the crown
+      out.extra.push([[-0.050,0.620],[0.050,0.620],[0.050,1.120],[-0.050,1.120]]);
+      out.extra.push([[-0.170,0.870],[0.170,0.870],[0.170,0.960],[-0.170,0.960]]);
+      for(const [x,y] of [KING_TIPS[0], KING_TIPS[1], KING_TIPS[3], KING_TIPS[4]]) out.circles.push([x, y + 0.055, 0.078]);
+      out.lines.push([[-0.40,0.16],[0.40,0.16]]);
+      return out;
+    };
+
+    // rook: profile up to the rim, then battlements
+    const ROOK_PROFILE = [
+      [0.000,0.000],[0.430,0.000],[0.430,0.075],[0.360,0.115],[0.280,0.155],
+      [0.240,0.220],[0.232,0.420],[0.290,0.480],[0.345,0.535],[0.345,0.605]
+    ];
+    S.r = function(){
+      const pts = [];
+      for(const p of ROOK_PROFILE) if(p[0] > 0) pts.push([p[0], p[1]]);
+      const R = 0.345, TOP = 0.735, NOTCH = 0.660;
+      const xs = [R, 0.185, 0.185, 0.075, 0.075, -0.075, -0.075, -0.185, -0.185, -R];
+      const ys = [TOP, TOP, NOTCH, NOTCH, TOP, TOP, NOTCH, NOTCH, TOP, TOP];
+      for(let i=0;i<xs.length;i++) pts.push([xs[i], ys[i]]);
+      for(let i=ROOK_PROFILE.length-1;i>=0;i--) if(ROOK_PROFILE[i][0] > 0) pts.push([-ROOK_PROFILE[i][0], ROOK_PROFILE[i][1]]);
+      return { body: pts, extra: [], circles: [],
+               lines: [[[-0.28,0.155],[0.28,0.155]], [[-0.236,0.420],[0.236,0.420]]] };
+    };
+
+    const BISHOP_PROFILE = [
+      [0.000,0.000],[0.440,0.000],[0.440,0.075],[0.360,0.115],[0.275,0.155],
+      [0.155,0.200],[0.145,0.255],[0.285,0.295],[0.285,0.350],[0.165,0.395],
+      [0.215,0.490],[0.235,0.600],[0.195,0.710],[0.125,0.790],[0.062,0.845],
+      [0.098,0.885],[0.098,0.925],[0.050,0.958],[0.000,0.965]
+    ];
+    S.b = function(){
+      const pts = [];
+      for(const p of BISHOP_PROFILE) pts.push([p[0], p[1]]);
+      for(let i=BISHOP_PROFILE.length-1;i>=0;i--) pts.push([-BISHOP_PROFILE[i][0], BISHOP_PROFILE[i][1]]);
+      const out = { body: pts, extra: [], circles: [], lines: [] };
+      // the little cross on top of the mitre
+      out.extra.push([[-0.030,0.958],[0.030,0.958],[0.030,1.085],[-0.030,1.085]]);
+      out.extra.push([[-0.098,1.005],[0.098,1.005],[0.098,1.052],[-0.098,1.052]]);
+      out.lines.push([[-0.275,0.155],[0.275,0.155]]);
+      out.lines.push([[0.105,0.645],[-0.060,0.775]]);   // the mitre slit
+      return out;
+    };
+
+    // knight: horse head facing left — ear, forehead, nose, mouth notch, jaw
+    // and a maned neck, drawn as one closed outline
+    const KNIGHT = [
+      [-0.430,0.000],[ 0.430,0.000],[ 0.430,0.070],[ 0.355,0.110],[ 0.270,0.150],
+      [ 0.225,0.210],[ 0.245,0.330],[ 0.270,0.460],[ 0.268,0.580],[ 0.245,0.660],
+      [ 0.255,0.720],[ 0.215,0.780],[ 0.245,0.900],[ 0.155,0.830],[ 0.105,0.860],
+      [ 0.020,0.880],[-0.070,0.870],[-0.160,0.840],[-0.250,0.790],[-0.330,0.720],
+      [-0.400,0.655],[-0.455,0.600],[-0.475,0.550],[-0.440,0.520],[-0.380,0.515],
+      [-0.350,0.545],[-0.310,0.520],[-0.270,0.470],[-0.225,0.415],[-0.185,0.340],
+      [-0.175,0.260],[-0.210,0.200],[-0.290,0.150],[-0.360,0.110],[-0.430,0.070]
+    ];
+    S.n = function(){
+      return {
+        body: KNIGHT,
+        extra: [],
+        circles: [[-0.145,0.680,0.042]],            // the eye
+        lines: [
+          [[ 0.200,0.740],[ 0.090,0.700]],          // mane
+          [[ 0.235,0.620],[ 0.115,0.585]],
+          [[ 0.250,0.500],[ 0.140,0.475]],
+          [[-0.270,0.150],[ 0.270,0.150]]           // base band
+        ]
+      };
+    };
+
+    return S;
+  })();
+
   const PieceVec2D = (function(){
     const PROFILES = Piece3D.PROFILES, KH = Piece3D.KNIGHT_HEAD, smooth = Piece3D.smoothPath;
 
@@ -3918,6 +4028,17 @@
     function shapesFor(rawType){
       const type = String(rawType == null ? '' : rawType).toLowerCase();
       if(!PROFILES[type]) throw new Error('PieceVec2D: unknown piece type "' + rawType + '"');
+      // The five drawn shapes take priority; anything else (the pawn) still
+      // comes from the turned profile.
+      if(SHAPES_2D[type]){
+        const drawn = SHAPES_2D[type]();
+        return {
+          body: drawn.body,
+          extra: drawn.extra || [],
+          lines: drawn.lines || [],
+          circles: drawn.circles || []
+        };
+      }
       const out = { body: [], extra: [], lines: [], circles: [] };
       if(type === 'n'){
         out.body = knightOutline();
