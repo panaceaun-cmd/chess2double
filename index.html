@@ -10795,8 +10795,9 @@
     btn.onclick = () => document.getElementById('consent-modal').classList.remove('show');
     document.getElementById('consent-modal').classList.add('show');
   }
-  function requireConsent(){
-    if(consentAccepted()) return true;
+  function requireConsent(onDone){
+    const done = typeof onDone === 'function' ? onDone : function(){};
+    if(consentAccepted()){ done(); return true; }
     fillConsentBody();
     const row = document.getElementById('consent-check-row');
     const check = document.getElementById('consent-check');
@@ -10810,6 +10811,7 @@
       if(!check.checked) return;
       try{ localStorage.setItem('chess2-terms-accepted', CONSENT_VERSION); }catch(e){}
       document.getElementById('consent-modal').classList.remove('show');
+      done();
     };
     document.getElementById('consent-modal').classList.add('show');
     return false;
@@ -12055,9 +12057,6 @@
   function beginGameAfterLangReady(){
     if(gameStarted) return;
     gameStarted = true;
-    // First launch: ask before anything else. The board still builds behind
-    // the dialog, so accepting drops the player straight into a ready game.
-    requireConsent();
     renderModeMenu();
     populateChatSenders();
     newGame();
@@ -12067,7 +12066,11 @@
     initDraggablePanels();
     alignRightPanelsToBoard();
     setTimeout(alignRightPanelsToBoard, 300); // re-check once ad slots/fonts settle
-    showSplash();
+    // First launch: the consent dialog comes first, in the language just
+    // chosen, and the splash waits until it is accepted. On every later
+    // launch this runs straight through — the policy is only asked again if
+    // its version changes.
+    requireConsent(showSplash);
   }
 
   initLang();
