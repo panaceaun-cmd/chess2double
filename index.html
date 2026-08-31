@@ -657,10 +657,17 @@
      This gives the model's body its own hit area. It starts below the head so
      the part that overhangs the rank behind stays click-through, and the hit
      resolves to the piece, which bubbles to its own square. */
+  /* The hit area is limited to exactly the square the piece stands on.
+     The element is 190% of a square tall, so its own square is the bottom
+     100/190 = 52.6% of it — hence top:47.4%. Any smaller value lets the
+     piece swallow taps meant for the rank behind it: at the previous 30%
+     it stole a third of that square, which is why moving a piece there
+     took two or three taps. The part of the model that overhangs the rank
+     behind stays click-through, so that square keeps its full area. */
   #board.board3d .piece.piece3d::after{
     content:'';
     position:absolute;
-    left:14%; right:14%; top:30%; bottom:0;
+    left:8%; right:8%; top:47.4%; bottom:0;
     pointer-events:auto;
   }
   #board.board3d .piece.piece3d.captured-piece-ghost{ inset:auto 0 0 0; }
