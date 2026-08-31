@@ -3719,6 +3719,25 @@
       return { v: mesh.v.map(p=>[p[0]+dx, p[1]+dy, p[2]+dz]), t: mesh.t.map(t=>t.slice()) };
     }
 
+    // A ball, built as a solid of revolution like everything else here.
+    function sphere(r, cx, cy, cz, seg){
+      const prof = [];
+      const n = 10;
+      for(let i=0;i<=n;i++){
+        const a = -Math.PI/2 + (i/n)*Math.PI;
+        prof.push([Math.max(0, Math.cos(a)*r), Math.sin(a)*r]);
+      }
+      return translated(lathe(prof, seg || 20), cx, cy, cz);
+    }
+
+    // A tapered spike for crown points.
+    function spike(rBase, rTop, h, cx, cy, cz, seg){
+      const prof = [
+        [0, 0], [rBase, 0], [rBase*0.92, h*0.35], [rTop, h*0.82], [0, h]
+      ];
+      return translated(lathe(prof, seg || 16), cx, cy, cz);
+    }
+
     function box(w, h, d, cx, cy, cz){
       const hw=w/2, hh=h/2, hd=d/2;
       const v = [
@@ -3916,11 +3935,30 @@
           addMesh(mesh, box(0.072,0.190,0.070, 0, trim.crossY, 0));
           addMesh(mesh, box(0.170,0.068,0.070, 0, trim.crossBarY, 0));
         } else if(type === 'q'){
-          // crown points around the coronet
-          for(let i=0;i<7;i++){
-            const a = (i/7)*Math.PI*2;
-            addMesh(mesh, box(0.062,0.078,0.062,
-              Math.cos(a)*trim.crownR, trim.crownY, Math.sin(a)*trim.crownR));
+          if(v === 2){
+            // Style 2 wears a classic coronet: tapered points around the rim,
+            // each capped with a ball — the silhouette everyone recognises as
+            // a queen's crown, rather than the plain studs style 1 uses.
+            const pts = 5;
+            const rimR = trim.crownR;
+            const baseY = trim.crownY - 0.040;
+            const spikeH = 0.132;
+            for(let i=0;i<pts;i++){
+              const a = (i/pts)*Math.PI*2;
+              const x = Math.cos(a)*rimR, z = Math.sin(a)*rimR;
+              addMesh(mesh, spike(0.050, 0.018, spikeH, x, baseY, z, seg));
+              addMesh(mesh, sphere(0.042, x, baseY + spikeH + 0.028, z, seg));
+            }
+            // the centre finial, a little taller than the ring of points
+            addMesh(mesh, spike(0.048, 0.018, spikeH, 0, baseY + 0.010, 0, seg));
+            addMesh(mesh, sphere(0.046, 0, baseY + 0.010 + spikeH + 0.030, 0, seg));
+          } else {
+            // crown points around the coronet
+            for(let i=0;i<7;i++){
+              const a = (i/7)*Math.PI*2;
+              addMesh(mesh, box(0.062,0.078,0.062,
+                Math.cos(a)*trim.crownR, trim.crownY, Math.sin(a)*trim.crownR));
+            }
           }
         }
       }
