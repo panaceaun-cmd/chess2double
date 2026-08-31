@@ -773,6 +773,19 @@
     color:#173a12;
   }
   .ubc-play-btn:hover{ border-color:#dcf7d2; }
+  /* Settings in light orange — same treatment as the green Play button:
+     the base .ubc-btn styling sets gold on the resting, hover and open
+     states, so all three have to be restated or it reverts on interaction. */
+  #ubc-settings{
+    background:linear-gradient(180deg, #e39c4a, #b9631a 70%);
+    border-color:#d38b3c;
+    color:#fdf1e0;
+  }
+  #ubc-settings:hover{ border-color:#ffeacc; }
+  #ubc-settings.panel-open{
+    border-color:#ffeacc;
+    box-shadow:0 0 0 2px rgba(255,234,204,.35), 0 3px 8px rgba(0,0,0,.35);
+  }
   .ubc-play-btn.panel-open{
     border-color:#dcf7d2;
     box-shadow:0 0 0 2px rgba(220,247,210,.35), 0 3px 8px rgba(0,0,0,.35);
@@ -8943,24 +8956,48 @@
       // clocks players actually look at — the limit has to live here to be
       // seen at all.
       const moveLeft = active ? Math.max(0, moveLimitSec - moveElapsedSec) : moveLimitSec;
-      bar.innerHTML =
-        '<div class="corner-bar-top-row">' +
-          '<span class="corner-bar-nick" title="' + escapeHtml(nicknameForColor(c)) + '"><span class="corner-bar-dot" style="background:var(--accent-' + CSSCOLOR[c] + ')"></span>' + escapeHtml(nicknameForColor(c)) + '</span>' +
-          '<button type="button" class="corner-bar-movelimit' + (active?' active':'') + '" title="' + escapeHtml(t('moveLimitLabel')) + '">' +
-            '⏱ ' + formatTime(moveLeft) + '</button>' +
-          '<span class="corner-bar-timer' + (low?' low':'') + '" title="' + escapeHtml(t('changeTimerBtn')) + '">' + formatTime(timers[c] || 0) + '</span>' +
-        '</div>' +
-        '<div class="corner-bar-captured">' + icons + '</div>';
+
+      // This runs once per second. Rewriting innerHTML each time destroys and
+      // rebuilds every captured-piece icon and both buttons, which on a phone
+      // shows up as a steady flicker. So the structure is built only when it
+      // actually changes — a different player, a new captured piece — and the
+      // per-second update just writes the two clock strings.
+      const signature = c + '|' + nicknameForColor(c) + '|' + icons;
+      if(bar.dataset.sig !== signature){
+        bar.dataset.sig = signature;
+        bar.innerHTML =
+          '<div class="corner-bar-top-row">' +
+            '<span class="corner-bar-nick" title="' + escapeHtml(nicknameForColor(c)) + '"><span class="corner-bar-dot" style="background:var(--accent-' + CSSCOLOR[c] + ')"></span>' + escapeHtml(nicknameForColor(c)) + '</span>' +
+            '<button type="button" class="corner-bar-movelimit" title="' + escapeHtml(t('moveLimitLabel')) + '"></button>' +
+            '<span class="corner-bar-timer" title="' + escapeHtml(t('changeTimerBtn')) + '"></span>' +
+          '</div>' +
+          '<div class="corner-bar-captured">' + icons + '</div>';
+        const timerEl0 = bar.querySelector('.corner-bar-timer');
+        if(timerEl0) timerEl0.addEventListener('click', openTimerModal);
+        const mlEl0 = bar.querySelector('.corner-bar-movelimit');
+        if(mlEl0) mlEl0.addEventListener('click', openMoveLimitModal);
+      }
       const timerEl = bar.querySelector('.corner-bar-timer');
-      if(timerEl) timerEl.addEventListener('click', openTimerModal);
+      if(timerEl){
+        const txt = formatTime(timers[c] || 0);
+        if(timerEl.textContent !== txt) timerEl.textContent = txt;
+        timerEl.classList.toggle('low', low);
+      }
       const mlEl = bar.querySelector('.corner-bar-movelimit');
-      if(mlEl) mlEl.addEventListener('click', openMoveLimitModal);
+      if(mlEl){
+        const txt = '⏱ ' + formatTime(moveLeft);
+        if(mlEl.textContent !== txt) mlEl.textContent = txt;
+        mlEl.classList.toggle('active', active);
+      }
     });
   }
   function renderTimers(){
     renderCornerBars();
     const wrap = document.getElementById('timers-list');
-    if(!wrap) return;
+    // The dedicated timers panel is hidden in this layout; rebuilding its
+    // markup once a second is pure waste, and on mobile that work competes
+    // with compositing the 3D board.
+    if(!wrap || wrap.offsetParent === null) return;
     wrap.innerHTML = ['w','b','y','g'].map(c=>{
       const active = (c===turn && !gameOver);
       const low = timers[c] <= 60;
