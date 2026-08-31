@@ -2370,6 +2370,7 @@
         <button class="ubc-btn" id="ubc-record" type="button" style="width:100%; margin-top:10px; margin-bottom:4px;">Начать видеозапись игры</button>
         <div class="record-status" id="record-status" style="text-align:center; margin-bottom:6px;"></div>
         <button class="btn secondary" id="terms-btn" type="button" style="width:100%; margin-top:10px;">📄 Условия и конфиденциальность</button>
+        <div id="build-stamp" style="text-align:center; font-size:10.5px; color:var(--ink-dim); opacity:.7; margin-top:8px;"></div>
 
         <div class="settings-row" style="border-top:1px solid rgba(201,162,75,.2); margin-top:8px; padding-top:10px;">
           <span id="reset-layout-label">📐 Расположение блоков</span>
@@ -12190,6 +12191,16 @@
   // ================= END UNDER-BOARD CONTROL BUTTONS =================
 
   let gameStarted = false;
+  // Shown at the bottom of Settings. If the board is ever blank again, this
+  // line tells us instantly whether the browser is running the current file
+  // or a stale cached one — the difference between a real bug and a stale
+  // deploy, which is otherwise impossible to tell apart from a screenshot.
+  const BUILD_VERSION = '2026-08-31 · 1';
+  (function stampBuild(){
+    const el = document.getElementById('build-stamp');
+    if(el) el.textContent = 'CHESS 2 DOUBLE · build ' + BUILD_VERSION;
+  })();
+
   function beginGameAfterLangReady(){
     if(gameStarted) return;
     gameStarted = true;
