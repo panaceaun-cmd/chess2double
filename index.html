@@ -10470,6 +10470,46 @@
     }
     afterMove(captured);
   }
+
+  // Selecting a piece changes nothing except which square is highlighted and
+  // where the move dots sit. Rebuilding the whole board for that means
+  // recreating 128 squares and re-attaching 64 sprite images, which on a
+  // phone in 3D is a full re-composite of the scene — seen as a flash every
+  // time you tap a piece. This updates the few things that actually changed
+  // and leaves the rest of the DOM alone.
+  function refreshSelectionHighlights(){
+    const boardEl = document.getElementById('board');
+    if(!boardEl) return false;
+    const squares = boardEl.querySelectorAll('.sq');
+    if(!squares.length) return false;          // nothing built yet — caller should render()
+    for(const sq of squares){
+      const r = parseInt(sq.dataset.r), c = parseInt(sq.dataset.c);
+      if(!isFinite(r) || !isFinite(c)) continue;
+      sq.classList.toggle('selected', !!(selected && selected.r === r && selected.c === c));
+      const old = sq.querySelector('.dotmove, .dotcapture');
+      const mv = legalMoves.find(m => m.r === r && m.c === c);
+      if(!mv){
+        if(old) old.remove();
+        continue;
+      }
+      const cls = mv.capture ? 'dotcapture' : 'dotmove';
+      if(old){
+        if(old.className !== cls) old.className = cls;
+      } else {
+        const marker = document.createElement('div');
+        marker.className = cls;
+        sq.appendChild(marker);
+      }
+    }
+    return true;
+  }
+
+  // Use the cheap path when only the selection changed; fall back to a full
+  // rebuild if the board has not been built yet.
+  function renderSelection(){
+    if(!refreshSelectionHighlights()) render();
+  }
+
   function onSquareClick(e){
     if(gameOver) return;
     if(isPaused) return;
@@ -10504,14 +10544,14 @@
       } else {
         selected = null; legalMoves = [];
       }
-      render();
+      renderSelection();
       return;
     }
 
     if(clickedPiece && clickedPiece.color===turn){
       selected = {r,c};
       legalMoves = computeLegalMoves(r,c);
-      render();
+      renderSelection();
     }
   }
   document.getElementById('danger-move-confirm-yes').addEventListener('click', () => {
