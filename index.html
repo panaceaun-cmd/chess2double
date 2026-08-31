@@ -10576,6 +10576,13 @@
     const threats = gameOver ? [] : findKingThreats();
     updateCheckWarning(threats);
 
+    // Lines are a warning, not an opportunity list. findKingThreats() covers
+    // every king on the board, including the opponents' — drawing all of them
+    // told the player who they could take next, which is the opposite of a
+    // hint about danger. Only threats against the side to move are drawn.
+    const myTeam = OWNER[turn];
+    const myKingThreats = threats.filter(th => OWNER[th.kingColor] === myTeam);
+
     const pieceThreats = (gameOver || !attackHintsEnabled) ? [] : findMyPieceThreats();
     // Queen-under-threat gets its own distinct, hard-to-miss warning right
     // above the board (next to the existing check warning), rather than a
@@ -10586,7 +10593,7 @@
 
     const showCaptureLine = lastMove && lastMove.capture;
     updateLastCaptureBanner(showCaptureLine ? lastMove : null);
-    if(!showCaptureLine && threats.length === 0 && pieceThreats.length === 0) return;
+    if(!showCaptureLine && myKingThreats.length === 0 && pieceThreats.length === 0) return;
 
     // Deliberately appended to board-wrap, NOT board itself. #board gets a
     // 180° CSS rotation (the .flip180 class) when the game is flipped for
@@ -10617,7 +10624,7 @@
         addRedDot(svg, p2.x, p2.y, dotR);
       }
     }
-    threats.forEach(th=>{
+    myKingThreats.forEach(th=>{
       const p1 = svgSquareCenter(boardEl, boardRect, th.fromR, th.fromC);
       const p2 = svgSquareCenter(boardEl, boardRect, th.kingR, th.kingC);
       if(p1 && p2){
