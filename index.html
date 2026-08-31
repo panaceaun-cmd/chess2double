@@ -2193,8 +2193,6 @@
       <div id="settings-panel" class="modal-scroll-card">
         <div class="panel-header" id="settings-title">⚙️ Настройки</div>
         <button class="ubc-btn" id="saved-games-btn" type="button" style="width:100%; margin-bottom:8px;">💾 Сохранить или продолжить игру</button>
-        <button class="ubc-btn" id="ubc-record" type="button" style="width:100%; margin-bottom:4px;">Начать видеозапись игры</button>
-        <div class="record-status" id="record-status" style="text-align:center; margin-bottom:10px;"></div>
 
         <details class="settings-group" id="sg-sound">
           <summary class="ubc-btn settings-group-btn"><span id="sg-sound-label">🔊 Звуки и громкость</span></summary>
@@ -2369,6 +2367,8 @@
         </details>
 
 
+        <button class="ubc-btn" id="ubc-record" type="button" style="width:100%; margin-top:10px; margin-bottom:4px;">Начать видеозапись игры</button>
+        <div class="record-status" id="record-status" style="text-align:center; margin-bottom:6px;"></div>
         <button class="btn secondary" id="terms-btn" type="button" style="width:100%; margin-top:10px;">📄 Условия и конфиденциальность</button>
 
         <div class="settings-row" style="border-top:1px solid rgba(201,162,75,.2); margin-top:8px; padding-top:10px;">
@@ -2969,8 +2969,11 @@
     boardTheme = localStorage.getItem('chess2-theme') || 'beige-brown';
     pieceStyle = parseInt(localStorage.getItem('chess2-pstyle')) || 1;
     // fall back if the stored style was one of the removed ones
+    // PIECE_STYLE_CHOICES is the single source of truth for which styles
+    // exist. The old numeric range check that used to follow here capped at
+    // 10 and silently reset anyone who had picked the 3D or 2D styles added
+    // later, so their choice never survived a restart.
     if(PIECE_STYLE_CHOICES.indexOf(pieceStyle) === -1) pieceStyle = 1;
-    if(pieceStyle < 1 || pieceStyle > 10) pieceStyle = 1; // sanitize any stale out-of-range value
   }catch(e){ orientationMode = 1; }
   let board, turnIndex, turn, selected, legalMoves, enPassant, lastMove, gameOver, history, eliminatedColors;
   let isPaused = false;
@@ -8934,6 +8937,12 @@
   // ================= GAME TIMER =================
   const TIMER_DEFAULT_SEC = 7200;
   let agreedTimerSec = TIMER_DEFAULT_SEC;
+  // The game clock is a setting like any other — keep the player's choice
+  // instead of silently resetting to the default on every launch.
+  try{
+    const savedTimer = parseInt(localStorage.getItem('chess2-timer-sec'));
+    if(isFinite(savedTimer) && savedTimer > 0) agreedTimerSec = savedTimer;
+  }catch(e){}
 
   // ---- per-move limit and whose-turn reminder ----
   // Both are part of the table's agreed settings: they travel with the room
@@ -9270,6 +9279,7 @@
 
   function applyNewTimer(minutes){
     agreedTimerSec = minutes * 60;
+    try{ localStorage.setItem('chess2-timer-sec', String(agreedTimerSec)); }catch(e){}
     timers = {w:agreedTimerSec, b:agreedTimerSec, y:agreedTimerSec, g:agreedTimerSec};
     renderTimers();
     document.getElementById('timer-modal').classList.remove('show');
@@ -11998,8 +12008,10 @@
   });
 
   const PANELS_LOCKED_KEY = 'chess2-panels-locked';
-  let panelsLocked = false;
-  try{ panelsLocked = localStorage.getItem(PANELS_LOCKED_KEY) === '1'; }catch(e){}
+  // Locked by default: blocks should not slide around under a stray drag.
+  // Only an explicit stored '0' means the player unlocked them on purpose.
+  let panelsLocked = true;
+  try{ panelsLocked = localStorage.getItem(PANELS_LOCKED_KEY) !== '0'; }catch(e){}
   function applyPanelsLockedState(){
     document.body.classList.toggle('panels-locked', panelsLocked);
     const btn = document.getElementById('lock-panels-btn');
