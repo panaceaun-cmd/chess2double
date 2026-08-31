@@ -4472,10 +4472,25 @@
       try{ render(); }catch(e){}
     }
   }
+  // Writes the tilt AND the piece stand-up angle as plain degree values.
+  // The stylesheet derives the stand-up angle with calc(-1 * var(--board-tilt)),
+  // i.e. a number multiplied by an angle inside a custom property. Several
+  // mobile browsers fail to resolve that, the value comes out invalid, the
+  // rotation is dropped — and every piece lies flat on the board instead of
+  // standing on it. Setting a concrete value here sidesteps the whole issue,
+  // and because it is an inline style it also wins over the .flip180 rule,
+  // so the sign has to be worked out here too.
+  function syncBoardTiltVars(){
+    const boardEl = document.getElementById('board');
+    if(!boardEl) return;
+    const stand = isBoardCurrentlyFlipped() ? boardTilt3D : -boardTilt3D;
+    boardEl.style.setProperty('--board-tilt', boardTilt3D + 'deg');
+    boardEl.style.setProperty('--piece-stand', stand + 'deg');
+  }
+
   function applyBoardTilt(deg, save){
     boardTilt3D = Math.max(TILT_MIN, Math.min(TILT_MAX, deg));
-    const boardEl = document.getElementById('board');
-    if(boardEl) boardEl.style.setProperty('--board-tilt', boardTilt3D + 'deg');
+    syncBoardTiltVars();
     const up = document.getElementById('tilt-up');
     const down = document.getElementById('tilt-down');
     // "up" flattens the board toward a top-down view, "down" lays it further
@@ -9080,7 +9095,12 @@
     document.getElementById('timer-range-label').textContent = Math.round(agreedTimerSec/60) + ' ' + t('minutesShort');
     document.getElementById('timer-vote-players').innerHTML = '';
     document.getElementById('timer-range').disabled = false;
-    document.getElementById('timer-propose').textContent = t('timerProposeBtn');
+    // Agreement only matters when other people are involved. On your own
+    // device the change is simply yours to make, so the modal drops the
+    // "everyone must agree" wording and the button just applies it.
+    const online = !!onlineRoomId;
+    document.getElementById('timer-modal-desc').style.display = online ? '' : 'none';
+    document.getElementById('timer-propose').textContent = online ? t('timerProposeBtn') : t('nickSaveBtn');
     timerProposedMinutes = null;
     document.getElementById('timer-modal').classList.add('show');
   }
@@ -9095,36 +9115,17 @@
     }
   });
 
-  let timerVoteAgreed = new Set();
   let timerProposedMinutes = null;
   document.getElementById('timer-propose').addEventListener('click', ()=>{
     if(timerProposedMinutes !== null) return;
-    timerProposedMinutes = parseInt(document.getElementById('timer-range').value) || 120;
+    const chosen = parseInt(document.getElementById('timer-range').value) || 120;
+
+    // offline: apply straight away, nobody to ask
+    if(!onlineRoomId){ applyNewTimer(chosen); return; }
+
+    timerProposedMinutes = chosen;
     document.getElementById('timer-range').disabled = true;
-
-    if(onlineRoomId){
-      proposeOnlineTimer(timerProposedMinutes);
-      return;
-    }
-
-    timerVoteAgreed = new Set();
-    const wrap = document.getElementById('timer-vote-players');
-    wrap.innerHTML = '';
-    const players = uniquePlayers(mode);
-    players.forEach(p=>{
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'undo-player-btn';
-      btn.textContent = p + ' ' + t('agreeSuffix');
-      btn.addEventListener('click', ()=>{
-        if(timerVoteAgreed.has(p)) timerVoteAgreed.delete(p); else timerVoteAgreed.add(p);
-        btn.classList.toggle('agreed', timerVoteAgreed.has(p));
-        if(timerVoteAgreed.size === players.length){
-          applyNewTimer(timerProposedMinutes);
-        }
-      });
-      wrap.appendChild(btn);
-    });
+    proposeOnlineTimer(timerProposedMinutes);
   });
 
   function applyNewTimer(minutes){
@@ -9140,7 +9141,6 @@
 
 
   // ===== PER-MOVE LIMIT: same propose/agree flow as the whole-game clock =====
-  let moveLimitVoteAgreed = new Set();
   let moveLimitProposedMin = null;
   function moveLimitReqPath(){ return 'movelimit-request/' + onlineRoomId; }
 
@@ -9150,8 +9150,10 @@
     document.getElementById('movelimit-range-label').textContent = mins + ' ' + t('minutesShort');
     document.getElementById('movelimit-range').disabled = false;
     document.getElementById('movelimit-vote-players').innerHTML = '';
+    const online = !!onlineRoomId;
+    document.getElementById('movelimit-modal-desc').style.display = online ? '' : 'none';
     const prop = document.getElementById('movelimit-propose');
-    prop.textContent = t('timerProposeBtn');
+    prop.textContent = online ? t('timerProposeBtn') : t('nickSaveBtn');
     prop.style.display = '';
     prop.onclick = onMoveLimitPropose;
     moveLimitProposedMin = null;
@@ -9172,25 +9174,14 @@
 
   function onMoveLimitPropose(){
     if(moveLimitProposedMin !== null) return;
-    moveLimitProposedMin = parseInt(document.getElementById('movelimit-range').value) || 5;
+    const chosen = parseInt(document.getElementById('movelimit-range').value) || 5;
+
+    // offline: apply straight away, nobody to ask
+    if(!onlineRoomId){ applyNewMoveLimit(chosen); return; }
+
+    moveLimitProposedMin = chosen;
     document.getElementById('movelimit-range').disabled = true;
-    if(onlineRoomId){ proposeOnlineMoveLimit(moveLimitProposedMin); return; }
-    moveLimitVoteAgreed = new Set();
-    const wrap = document.getElementById('movelimit-vote-players');
-    wrap.innerHTML = '';
-    const players = uniquePlayers(mode);
-    players.forEach(p => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'undo-player-btn';
-      btn.textContent = p + ' ' + t('agreeSuffix');
-      btn.addEventListener('click', () => {
-        if(moveLimitVoteAgreed.has(p)) moveLimitVoteAgreed.delete(p); else moveLimitVoteAgreed.add(p);
-        btn.classList.toggle('agreed', moveLimitVoteAgreed.has(p));
-        if(moveLimitVoteAgreed.size === players.length) applyNewMoveLimit(moveLimitProposedMin);
-      });
-      wrap.appendChild(btn);
-    });
+    proposeOnlineMoveLimit(moveLimitProposedMin);
   }
 
   let onlineMoveLimitReqRef = null;
@@ -9992,6 +9983,7 @@
     // for offline hotseat play where everyone shares one screen.
     const flipBoard = isBoardCurrentlyFlipped();
     boardEl.classList.toggle('flip180', flipBoard);
+    syncBoardTiltVars();   // flipping inverts the stand-up angle
     const FILES = 'ABCDEFGHIJKLMNOP';
 
     // top row: corner + 16 file letters + corner
