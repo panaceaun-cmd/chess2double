@@ -561,6 +561,19 @@
   @media (prefers-reduced-motion: reduce){
     #board-wrap.view-3d, #board-wrap.view-3d::after{ animation:none; }
   }
+  /* Touch devices: drop the effects that are cheap on a desktop GPU but make
+     a phone re-rasterise the entire 3D scene every frame. The travelling
+     sheen uses mix-blend-mode over a preserve-3d subtree — the single most
+     expensive thing here — and the pulsing glow animates a large blurred
+     shadow. Both are decoration; the board itself is unchanged. */
+  @media (hover: none), (max-width: 820px){
+    #board-wrap.view-3d::after{ display:none; }
+    #board-wrap.view-3d{ animation:none; }
+    #board.board3d .piece.piece3d{
+      /* one tight shadow instead of two blurred ones, per piece, per frame */
+      filter:drop-shadow(0 2px 2px rgba(0,0,0,.55));
+    }
+  }
   #board.board3d{
     --board-tilt:45deg;
     --piece-stand:calc(-1 * var(--board-tilt));
@@ -589,6 +602,13 @@
     content:'';
     position:absolute; inset:0;
     pointer-events:none;
+    /* Nudged a hair toward the viewer. Sitting exactly in the square's own
+       plane inside a preserve-3d scene leaves the GPU with no defined draw
+       order between the two, and mobile GPUs resolve that inconsistently
+       from frame to frame — which is what produced the flickering black
+       patches on the board. A fraction of a pixel is enough to settle it
+       and is invisible. */
+    transform:translateZ(0.4px);
     background:
       linear-gradient(135deg, rgba(255,255,255,.11) 0%, rgba(255,248,225,.04) 34%, transparent 56%),
       linear-gradient(0deg, rgba(40,20,0,.09), transparent 50%);
@@ -649,6 +669,7 @@
     content:''; position:absolute; left:18%; right:18%; bottom:10%; height:16%;
     background:radial-gradient(ellipse at 50% 50%, rgba(0,0,0,.5), transparent 70%);
     border-radius:50%; pointer-events:none; z-index:0;
+    transform:translateZ(0.2px);   /* same reason as the gloss above */
   }
   /* The capture animations below set `transform` outright, which would drop
      the standing rotation and flatten the piece onto the board mid-animation.
@@ -3738,6 +3759,17 @@
     // multiplied by the same number — without that, the shared fit-to-canvas
     // scale would just shrink everything back and cancel the stretch out.
     const Y_STRETCH = 1.2;
+    // Phones get a coarser mesh. A board square is around 40px there, so the
+    // extra detail is invisible while the cost of building it is very real —
+    // it is the difference between a brief pause and a visible freeze while
+    // the pieces are prepared.
+    let LOW_DETAIL = false;
+    function setLowDetail(v){
+      const next = !!v;
+      if(next === LOW_DETAIL) return;
+      LOW_DETAIL = next;
+      for(const k of Object.keys(meshCache)) delete meshCache[k];
+    }
     const SEGMENTS = 40;
     const PROFILE_SUB = 6;   // spline subdivisions per profile segment
 
@@ -3752,8 +3784,8 @@
       const table = (v === 2) ? PROFILES_V2 : PROFILES;
       if(!table[type]) throw new Error('Piece3D: unknown piece type "' + rawType + '"');
       const trim = TRIM[v];
-      const sub = (v === 2) ? 8 : PROFILE_SUB;      // style 2 is rendered finer
-      const seg = (v === 2) ? 72 : 56;
+      const sub = LOW_DETAIL ? ((v === 2) ? 4 : 3) : ((v === 2) ? 8 : PROFILE_SUB);
+      const seg = LOW_DETAIL ? 34 : ((v === 2) ? 72 : 56);
       let mesh;
       if(type === 'n'){
         mesh = lathe(smoothPath(table.n, sub, false), seg);
@@ -3979,7 +4011,7 @@
     }
 
     return {
-      getMesh, buildMesh, renderToCanvas, hexToRgb, project,
+      getMesh, buildMesh, renderToCanvas, hexToRgb, project, setLowDetail,
     PROFILES, PROFILES_V2, KNIGHT_HEAD, KNIGHT_EAR, smoothPath,
       TYPES: ['k','q','r','b','n','p']
     };
@@ -4292,7 +4324,17 @@
   // keeps the edges crisp on high-density screens instead of going soft.
   // Rendered well above the on-screen square size so pieces stay crisp on
   // high-density displays instead of being upscaled from a small bitmap.
-  const PIECE3D_RES = 320;
+  // Sprite resolution and mesh detail both scale down on small screens: the
+  // pieces are drawn at roughly a square's size there, so the heavy version
+  // buys nothing and costs a visible freeze while it is generated.
+  const IS_SMALL_SCREEN = (function(){
+    try{
+      return (window.innerWidth || 0) < 820 ||
+             (window.matchMedia && window.matchMedia('(hover: none)').matches);
+    }catch(e){ return false; }
+  })();
+  const PIECE3D_RES = IS_SMALL_SCREEN ? 192 : 320;
+  try{ Piece3D.setLowDetail(IS_SMALL_SCREEN); }catch(e){}
   // One outline setting shared by every piece in both 3D styles.
   let outline3dColor = '#141414';
   let outline3dWidth = 2;
