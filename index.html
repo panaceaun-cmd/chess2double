@@ -12201,6 +12201,24 @@
     if(el) el.textContent = 'CHESS 2 DOUBLE · build ' + BUILD_VERSION;
   })();
 
+  // One-time cache purge per build. The service worker can keep serving an
+  // old copy of this page long after a new one is published — and if that old
+  // copy was broken, the player is stuck with it and no amount of reloading
+  // helps. Whenever a build runs for the first time on this device it drops
+  // every cache the worker holds, so the next load comes from the network.
+  (function purgeStaleCaches(){
+    let seen = null;
+    try{ seen = localStorage.getItem('chess2-build-seen'); }catch(e){}
+    if(seen === BUILD_VERSION) return;
+    try{ localStorage.setItem('chess2-build-seen', BUILD_VERSION); }catch(e){}
+    if(typeof caches === 'undefined') return;
+    try{
+      caches.keys()
+        .then(names => Promise.all(names.map(n => caches.delete(n))))
+        .catch(()=>{});
+    }catch(e){}
+  })();
+
   function beginGameAfterLangReady(){
     if(gameStarted) return;
     gameStarted = true;
