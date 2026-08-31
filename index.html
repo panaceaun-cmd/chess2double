@@ -3860,32 +3860,41 @@
         [0.130,0.814],[0.072,0.858],[0.084,0.886],[0.058,0.906],[0.000,0.914]
       ],
       q: [
-        // Matches the turned-metal queen in the reference: a thin disc plinth,
-        // a bell that flares wide at the foot and sweeps up in a strong
-        // concave curve, a waist set high just under two collar bands, then a
-        // short neck carrying a small coronet.
-        [0.000,0.000],[0.372,0.000],[0.372,0.028],[0.352,0.044],
-        [0.336,0.058],[0.336,0.074],
-        [0.320,0.096],[0.296,0.132],[0.268,0.180],[0.242,0.238],
-        [0.218,0.302],[0.198,0.372],[0.180,0.442],[0.166,0.512],
-        [0.156,0.578],[0.150,0.634],[0.147,0.678],
-        [0.180,0.694],[0.180,0.712],[0.158,0.724],
-        [0.174,0.738],[0.174,0.756],[0.150,0.768],
-        [0.144,0.798],
-        [0.166,0.826],[0.182,0.856],[0.188,0.882],[0.156,0.874],[0.000,0.866]
+        // Stepped plinth, concave column, banded collar, then a coronet that
+        // opens outward — the queen from the reference pair.
+        [0.000,0.000],[0.430,0.000],[0.430,0.042],[0.412,0.054],
+        [0.396,0.062],[0.396,0.098],[0.376,0.110],
+        [0.352,0.120],[0.352,0.150],[0.330,0.164],
+        [0.300,0.192],[0.268,0.232],[0.240,0.282],[0.216,0.342],
+        [0.198,0.406],[0.184,0.472],[0.174,0.536],[0.168,0.594],
+        [0.206,0.608],[0.206,0.636],[0.184,0.648],
+        [0.196,0.660],[0.196,0.680],[0.176,0.692],
+        [0.166,0.718],
+        [0.182,0.740],[0.198,0.774],[0.206,0.802],
+        [0.228,0.814],[0.228,0.838],
+        [0.268,0.882],[0.268,0.894],[0.230,0.886],[0.000,0.878]
       ],
       k: [
-        [0.000,0.000],[0.420,0.000],[0.420,0.054],[0.386,0.088],[0.308,0.124],
-        [0.198,0.180],[0.170,0.376],[0.200,0.466],[0.282,0.518],[0.282,0.548],
-        [0.212,0.580],[0.186,0.620],[0.258,0.706],[0.296,0.810],[0.276,0.880],
-        [0.234,0.912],[0.284,0.942],[0.290,0.974],[0.000,0.986]
+        // Same body as the queen, but the head is a cone that flares upward
+        // into a flat cap, with the cross above it.
+        [0.000,0.000],[0.430,0.000],[0.430,0.042],[0.412,0.054],
+        [0.396,0.062],[0.396,0.098],[0.376,0.110],
+        [0.352,0.120],[0.352,0.150],[0.330,0.164],
+        [0.300,0.192],[0.268,0.232],[0.240,0.282],[0.216,0.342],
+        [0.198,0.406],[0.184,0.472],[0.174,0.536],[0.168,0.594],
+        [0.206,0.608],[0.206,0.636],[0.184,0.648],
+        [0.196,0.660],[0.196,0.680],[0.176,0.692],
+        [0.166,0.718],
+        [0.184,0.740],[0.228,0.802],[0.264,0.858],[0.282,0.882],
+        [0.298,0.892],[0.298,0.910],[0.272,0.920],[0.000,0.914]
       ]
     };
     // Where each variant's decorations sit, since the two sets are different heights.
     const TRIM = {
       1: { rookY:0.660, rookR:0.245, rookBox:0.135, crossY:0.985, crossBarY:1.030,
            crownY:0.884, crownR:0.216, headScale:1.00, headLift:0.000 },
-      2: { rookY:0.678, rookR:0.256, rookBox:0.142, crossY:1.014, crossBarY:1.062,
+      2: { rookY:0.678, rookR:0.256, rookBox:0.142, crossY:1.006, crossBarY:1.034,
+           crossW:0.086, crossH:0.210, crossBarW:0.208, crossBarH:0.080,
            crownY:0.908, crownR:0.226, headScale:1.05, headLift:0.020 }
     };
 
@@ -3941,8 +3950,11 @@
               Math.cos(a)*trim.rookR, trim.rookY, Math.sin(a)*trim.rookR));
           }
         } else if(type === 'k'){
-          addMesh(mesh, box(0.072,0.190,0.070, 0, trim.crossY, 0));
-          addMesh(mesh, box(0.170,0.068,0.070, 0, trim.crossBarY, 0));
+          // Cross proportions come from the trim table: style 2 wears the
+          // heavier cross of the reference pair, style 1 keeps its slimmer one.
+          const cwx = trim.crossW || 0.072, cbw = trim.crossBarW || 0.170;
+          addMesh(mesh, box(cwx, trim.crossH || 0.190, cwx*0.97, 0, trim.crossY, 0));
+          addMesh(mesh, box(cbw, trim.crossBarH || 0.068, cwx*0.97, 0, trim.crossBarY, 0));
         } else if(type === 'q'){
           if(v === 2){
             // Style 2 wears a classic coronet: tapered points around the rim,
@@ -3950,17 +3962,17 @@
             // a queen's crown, rather than the plain studs style 1 uses.
             const pts = 5;
             const rimR = trim.crownR;
-            const baseY = trim.crownY - 0.052;
-            const spikeH = 0.108;
+            const baseY = trim.crownY - 0.046;
+            const spikeH = 0.086;
             for(let i=0;i<pts;i++){
               const a = (i/pts)*Math.PI*2;
               const x = Math.cos(a)*rimR, z = Math.sin(a)*rimR;
-              addMesh(mesh, spike(0.036, 0.013, spikeH, x, baseY, z, seg));
-              addMesh(mesh, sphere(0.032, x, baseY + spikeH + 0.020, z, seg));
+              addMesh(mesh, spike(0.030, 0.011, spikeH, x, baseY, z, seg));
+              addMesh(mesh, sphere(0.028, x, baseY + spikeH + 0.018, z, seg));
             }
             // the centre finial, a little taller than the ring of points
-            addMesh(mesh, spike(0.034, 0.013, spikeH*0.92, 0, baseY + 0.006, 0, seg));
-            addMesh(mesh, sphere(0.034, 0, baseY + 0.006 + spikeH*0.92 + 0.022, 0, seg));
+            addMesh(mesh, spike(0.040, 0.024, spikeH*1.55, 0, baseY - 0.010, 0, seg));
+            addMesh(mesh, sphere(0.046, 0, baseY - 0.010 + spikeH*1.55 + 0.034, 0, seg));
           } else {
             // crown points around the coronet
             for(let i=0;i<7;i++){
