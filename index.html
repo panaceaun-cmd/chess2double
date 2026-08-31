@@ -4000,7 +4000,7 @@
 
     // Renders one piece into a canvas and returns it. `size` is the pixel
     // size of the square the piece will sit on.
-    function renderToCanvas(type, hex, size, makeCanvas, variant, outline){
+    function renderToCanvas(type, hex, size, makeCanvas, variant, outline, squareFit){
       const v = (variant === 2) ? 2 : 1;
       const mesh = getMesh(type, v);
       const base = hexToRgb(hex);
@@ -4015,11 +4015,14 @@
         if(p[1]<minY) minY=p[1]; if(p[1]>maxY) maxY=p[1];
       }
 
-      // A piece is drawn up to ~1.9× the square size tall so a king towers
-      // over its square the way a real set does.
+      // Two shapes of sprite. On a tilted 3D board a piece stands up and may
+      // rise well above its own square, so the canvas is ~1.9 squares tall.
+      // On a flat board the piece has to sit INSIDE one square: a tall canvas
+      // scaled to fit a square cell would shrink the piece to about half the
+      // cell, which is exactly what made them look tiny in 2D.
       const cw = Math.max(8, Math.round(size));
-      const ch = Math.max(8, Math.round(size * 1.9));
-      const pad = cw * 0.06;
+      const ch = Math.max(8, Math.round(size * (squareFit ? 1 : 1.9)));
+      const pad = cw * (squareFit ? 0.045 : 0.06);   // margin so the king's cross is not clipped
 
       // IMPORTANT: the scale is shared by every piece type rather than fitted
       // per-piece. Fitting each piece to the canvas individually would blow a
@@ -4524,7 +4527,11 @@
     const hex = (getComputedStyle(document.documentElement)
       .getPropertyValue('--accent-' + CSSCOLOR[colorKey]) || '').trim() || DEFAULT_ACCENT[colorKey];
     const variant = piece3dVariant();
-    const key = type + '|' + hex + '|v' + variant + '|o' + outline3dColor + ':' + outline3dWidth;
+    // On a flat board the sprite has to fit inside a single square; on the
+    // tilted 3D board it may stand above it. Both shapes can be needed in one
+    // session, so the fit is part of the cache key.
+    const squareFit = !view3D;
+    const key = type + '|' + hex + '|v' + variant + '|o' + outline3dColor + ':' + outline3dWidth + (squareFit ? '|sq' : '|tall');
     if(piece3dCache[key]) return piece3dCache[key];
     let url = '';
     try{
@@ -4532,7 +4539,7 @@
         const c = document.createElement('canvas');
         c.width = w; c.height = h;
         return c;
-      }, variant, { color: outline3dColor, px: outline3dWidth });
+      }, variant, { color: outline3dColor, px: outline3dWidth }, squareFit);
       url = canvas.toDataURL('image/png');
     }catch(e){ return ''; }   // any failure falls back to the glyph rendering
     piece3dCache[key] = url;
