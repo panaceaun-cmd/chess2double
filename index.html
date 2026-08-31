@@ -285,12 +285,15 @@
   /* the per-move limit sits on its own line under the clock, and is a button
      because tapping it is how the table renegotiates the limit */
   .timer-row{ flex-wrap:wrap; }
-  .corner-bar-movelimit-row{ display:flex; justify-content:flex-end; margin-top:3px; }
+  /* Sits on the same line as the clock, immediately right of the nickname.
+     It must never squeeze the nickname out, so it refuses to shrink and the
+     nickname keeps the flexible space. */
   .corner-bar-movelimit{
+    flex:0 0 auto; margin-left:auto;
     background:rgba(0,0,0,.3); color:var(--ink-dim);
     border:1px solid var(--brass-dim); border-radius:6px;
     padding:2px 7px; font-family:'Inter',sans-serif; font-size:11px;
-    cursor:pointer; line-height:1.35;
+    cursor:pointer; line-height:1.35; white-space:nowrap;
   }
   .corner-bar-movelimit.active{ color:var(--brass); border-color:var(--brass); }
   .corner-bar-movelimit:hover{ color:#ffe6a8; border-color:var(--brass); }
@@ -788,6 +791,7 @@
   @media (max-width:600px){
     .corner-bar-nick{ font-size:10.5px; }
     .corner-bar-timer{ font-size:10.5px; }
+    .corner-bar-movelimit{ font-size:9.5px; padding:1px 5px; }
     .corner-bar{ padding:4px 6px; }
   }
   #board{
@@ -8885,11 +8889,9 @@
       bar.innerHTML =
         '<div class="corner-bar-top-row">' +
           '<span class="corner-bar-nick" title="' + escapeHtml(nicknameForColor(c)) + '"><span class="corner-bar-dot" style="background:var(--accent-' + CSSCOLOR[c] + ')"></span>' + escapeHtml(nicknameForColor(c)) + '</span>' +
-          '<span class="corner-bar-timer' + (low?' low':'') + '" title="' + escapeHtml(t('changeTimerBtn')) + '">' + formatTime(timers[c] || 0) + '</span>' +
-        '</div>' +
-        '<div class="corner-bar-movelimit-row">' +
           '<button type="button" class="corner-bar-movelimit' + (active?' active':'') + '" title="' + escapeHtml(t('moveLimitLabel')) + '">' +
             '⏱ ' + formatTime(moveLeft) + '</button>' +
+          '<span class="corner-bar-timer' + (low?' low':'') + '" title="' + escapeHtml(t('changeTimerBtn')) + '">' + formatTime(timers[c] || 0) + '</span>' +
         '</div>' +
         '<div class="corner-bar-captured">' + icons + '</div>';
       const timerEl = bar.querySelector('.corner-bar-timer');
