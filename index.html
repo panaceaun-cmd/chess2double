@@ -2325,7 +2325,7 @@
         <div class="color-picker-row"><input type="text" class="pc-name-input" id="pc-name-w" data-color="w" maxlength="20" value="Белые"><input type="color" id="piece-color-w" value="#fbf6ec"></div>
         <div class="color-picker-row"><input type="text" class="pc-name-input" id="pc-name-b" data-color="b" maxlength="20" value="Чёрные"><input type="color" id="piece-color-b" value="#1b1310"></div>
         <div class="color-picker-row"><input type="text" class="pc-name-input" id="pc-name-y" data-color="y" maxlength="20" value="Жёлтые"><input type="color" id="piece-color-y" value="#e8c33e"></div>
-        <div class="color-picker-row"><input type="text" class="pc-name-input" id="pc-name-g" data-color="g" maxlength="20" value="Серые"><input type="color" id="piece-color-g" value="#9a9691"></div>
+        <div class="color-picker-row"><input type="text" class="pc-name-input" id="pc-name-g" data-color="g" maxlength="20" value="Серые"><input type="color" id="piece-color-g" value="#807b75"></div>
         <button class="btn secondary" id="piece-colors-reset">↺ Цвета по умолчанию</button>
         <div id="color-sync-status" style="font-size:10.5px; color:var(--ink-dim); margin-top:4px; min-height:13px;"></div>
         <div class="settings-row">
@@ -12255,7 +12255,7 @@
   // line tells us instantly whether the browser is running the current file
   // or a stale cached one — the difference between a real bug and a stale
   // deploy, which is otherwise impossible to tell apart from a screenshot.
-  const BUILD_VERSION = '2026-09-01 · 1';
+  const BUILD_VERSION = '2026-09-01 · 2';
   (function stampBuild(){
     const el = document.getElementById('build-stamp');
     if(el) el.textContent = 'CHESS 2 DOUBLE · build ' + BUILD_VERSION;
@@ -12317,14 +12317,22 @@
         // on serving a cached build indefinitely, so players keep seeing an
         // old version of the game long after a new one is published.
         try{ reg.update(); }catch(e){}
-        if(reg.waiting){ try{ reg.waiting.postMessage({type:'SKIP_WAITING'}); }catch(e){} }
+        // Only take over immediately when THIS tab has no controller yet —
+        // i.e. a brand new load with nothing at risk. If a controller already
+        // exists, this tab (or a sibling tab sharing the same registration)
+        // is already running the game: forcing the new worker to activate
+        // here would fire 'controllerchange' — and therefore a reload — in
+        // every open tab at once, including one that might be mid-way through
+        // joining a room. Left alone, the waiting worker activates safely the
+        // next time the app is opened with no tabs of it already running.
+        if(reg.waiting && !navigator.serviceWorker.controller){
+          try{ reg.waiting.postMessage({type:'SKIP_WAITING'}); }catch(e){}
+        }
         reg.addEventListener('updatefound', () => {
           const fresh = reg.installing;
           if(!fresh) return;
           fresh.addEventListener('statechange', () => {
-            // A new worker that reaches "installed" while one is already in
-            // control means an update is ready and waiting.
-            if(fresh.state === 'installed' && navigator.serviceWorker.controller){
+            if(fresh.state === 'installed' && !navigator.serviceWorker.controller){
               try{ fresh.postMessage({type:'SKIP_WAITING'}); }catch(e){}
             }
           });
@@ -12332,11 +12340,19 @@
       }).catch(()=>{});
 
       // When the new worker takes over, reload once so the fresh HTML is
-      // actually shown. The guard stops this from looping.
-      let reloadedForUpdate = false;
+      // actually shown. The guard used to be a plain variable, which resets
+      // to false on every reload and so gives zero protection against a
+      // genuine loop — if 'controllerchange' ever fired again after the
+      // reload, the page reloaded again, forever, and the game never
+      // finished loading (no board, no nickname — just a tab stuck
+      // reloading itself). sessionStorage survives the reload and is scoped
+      // to this one tab, so the cap of "at most one auto-reload" actually
+      // holds even across repeated activations.
       navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if(reloadedForUpdate) return;
-        reloadedForUpdate = true;
+        let already = false;
+        try{ already = sessionStorage.getItem('chess2-sw-reloaded') === '1'; }catch(e){}
+        if(already) return;
+        try{ sessionStorage.setItem('chess2-sw-reloaded', '1'); }catch(e){}
         location.reload();
       });
     });
