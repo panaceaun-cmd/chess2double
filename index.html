@@ -627,8 +627,8 @@
      positioned absolutely and allowed to rise well above its own square —
      a king overlaps the ranks behind it exactly like a physical piece. */
   #board.board3d .piece.piece3d{
-    position:absolute; left:0; right:0; bottom:0;
-    height:190%;
+    position:absolute; left:-22.5%; right:-22.5%; bottom:0;
+    height:260%;
     background-repeat:no-repeat;
     background-position:center bottom;
     background-size:contain;
@@ -667,7 +667,7 @@
   #board.board3d .piece.piece3d::after{
     content:'';
     position:absolute;
-    left:8%; right:8%; top:47.4%; bottom:0;
+    left:24%; right:24%; top:61.5%; bottom:0;
     pointer-events:auto;
   }
   #board.board3d .piece.piece3d.captured-piece-ghost{ inset:auto 0 0 0; }
@@ -4050,9 +4050,15 @@
       // On a flat board the piece has to sit INSIDE one square: a tall canvas
       // scaled to fit a square cell would shrink the piece to about half the
       // cell, which is exactly what made them look tiny in 2D.
-      const cw = Math.max(8, Math.round(size));
-      const ch = Math.max(8, Math.round(size * (squareFit ? 1 : 1.9)));
-      const pad = cw * (squareFit ? 0.045 : 0.06);   // margin so the king's cross is not clipped
+      // On the 3D board the canvas is wider and taller than a square, so a
+      // piece can stand about two squares high with its base overhanging the
+      // neighbours slightly, as a real piece does. Fitting it inside a single
+      // square was what kept the pieces looking squat: width ran out first and
+      // capped the height. These two numbers must stay in step with the CSS
+      // box for .piece3d in 3D (-22.5% either side, height 260%).
+      const cw = Math.max(8, Math.round(size * (squareFit ? 1 : 1.45)));
+      const ch = Math.max(8, Math.round(size * (squareFit ? 1 : 2.60)));
+      const pad = cw * (squareFit ? 0.045 : 0.10);   // margin so crowns and crosses are never clipped
 
       // IMPORTANT: the scale is shared by every piece type rather than fitted
       // per-piece. Fitting each piece to the canvas individually would blow a
@@ -4060,7 +4066,13 @@
       // that makes a chess set readable at a glance. REF_W / REF_H are the
       // widest and tallest piece in the set (the king), so every other piece
       // lands proportionally smaller — exactly as on a real board.
-      const REF_W = 0.80, REF_H = 1.10 * Y_STRETCH;
+      // Measured from the models: the widest is 0.925 across, the tallest
+      // 1.337 high. Smaller values here shave the style-2 king's base and
+      // the queen's crown.
+      // NOTE: the meshes already carry Y_STRETCH from buildMesh, so these are
+      // plain model units — multiplying by the stretch again here counted it
+      // twice and shrank every piece.
+      const REF_W = 0.95, REF_H = 1.37;
       const scale = Math.min((cw - pad*2)/REF_W, (ch - pad*2)/REF_H);
 
       const ox = cw/2 - ((minX+maxX)/2)*scale;
