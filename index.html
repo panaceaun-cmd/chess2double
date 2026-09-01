@@ -1601,8 +1601,18 @@
   .modal-overlay{
     position:fixed; inset:0; background:rgba(10,6,3,.82);
     display:none; align-items:center; justify-content:center; z-index:70; padding:20px;
+    /* Safety net for any modal whose content ends up taller than the
+       screen (long stats list, small/landscape phone, etc). Without this
+       the overlay had no scroll of its own, so a card taller than the
+       viewport just got clipped top and bottom with no way to reach
+       whatever fell below the fold — including the Close button. */
+    overflow-y:auto;
   }
   .modal-overlay.show{display:flex;}
+  /* Flex-centered content that overflows still needs real margin so the
+     browser gives it scrollable space above and below instead of
+     clipping it against the flex container's own edges. */
+  .modal-overlay > .card{ margin:auto; }
   .modal-overlay input[type=text]{
     width:100%; background:rgba(0,0,0,.3); color:var(--ink); border:1px solid var(--brass-dim);
     border-radius:8px; padding:10px 12px; font-size:14px; font-family:'Inter',sans-serif; margin-top:6px;
@@ -2507,10 +2517,10 @@
   </div>
 
   <div id="stats-modal" class="modal-overlay">
-    <div class="card" style="max-width:420px;">
-      <h2 id="stats-modal-title">📊 Статистика игроков</h2>
-      <div id="stats-content" style="max-height:360px; overflow-y:auto; text-align:left; font-size:12.5px;"></div>
-      <button class="btn secondary" id="stats-close" style="margin-top:14px;">Закрыть</button>
+    <div class="card" style="max-width:420px; max-height:90vh; display:flex; flex-direction:column;">
+      <h2 id="stats-modal-title" style="flex:0 0 auto;">📊 Статистика игроков</h2>
+      <div id="stats-content" style="flex:1 1 auto; min-height:0; max-height:360px; overflow-y:auto; text-align:left; font-size:12.5px;"></div>
+      <button class="btn secondary" id="stats-close" style="flex:0 0 auto; margin-top:14px;">Закрыть</button>
     </div>
   </div>
 
@@ -12255,7 +12265,7 @@
   // line tells us instantly whether the browser is running the current file
   // or a stale cached one — the difference between a real bug and a stale
   // deploy, which is otherwise impossible to tell apart from a screenshot.
-  const BUILD_VERSION = '2026-09-01 · 3';
+  const BUILD_VERSION = '2026-09-01 · 4';
   (function stampBuild(){
     const el = document.getElementById('build-stamp');
     if(el) el.textContent = 'CHESS 2 DOUBLE · build ' + BUILD_VERSION;
