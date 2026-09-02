@@ -4751,18 +4751,26 @@
     if(piecePackTintCache[key]) return piecePackTintCache[key];
     let url = '';
     try{
-      const scale = PIECE_PACK_TYPE_SCALE[t] || 1;
+      // The source art is tiny (a king is 41x88 native), and the board draws
+      // it several times that size, so the browser's own upscaling smeared
+      // small carved features — the king's cross and the queen's crown
+      // points became soft blobs. Building the sprite at a multiple of the
+      // native size instead means the local-detail pass below runs at that
+      // higher resolution and the browser has far less scaling left to do,
+      // which is what keeps those features crisp on screen.
+      const SS = 3;
+      const scale = (PIECE_PACK_TYPE_SCALE[t] || 1) * SS;
       const pieceW = img.naturalWidth * scale, pieceH = img.naturalHeight * scale;
       // outline width uses the same 0-8 slider as the 3D models; scaled down
       // to match this artwork's much smaller native resolution
       const outlinePx = outline3dWidth > 0 ? Math.max(1, Math.round(outline3dWidth * (pieceH / 260))) : 0;
-      const pad = outlinePx + 2;
+      const pad = outlinePx + 2*SS;
       let canvasW, canvasH, drawX, drawY;
       if(tall){
         const boxRatio = 1.45 / 2.60;   // same width:height shape as the CSS standing box
         const kingImg = piecePackTemplateImg(mat, 'K');
         const kingH = (kingImg.complete && kingImg.naturalHeight ? kingImg.naturalHeight : img.naturalHeight)
-          * (PIECE_PACK_TYPE_SCALE.K || 1);
+          * (PIECE_PACK_TYPE_SCALE.K || 1) * SS;
         canvasH = kingH / PIECE_PACK_KING_FILL + pad*2;
         canvasW = canvasH * boxRatio;
         drawX = (canvasW - pieceW) / 2;
@@ -4833,10 +4841,44 @@
       // keeps every piece of a colour on the same curve.
       const lumRange = packLumRange(mat);
       const lumMin = lumRange.min, lumSpan = lumRange.span;
-      for(let i=0;i<d.length;i+=4){
+      // Small carved features — the cross on the king, the queen's crown
+      // points, the turned rings around a collar — are only a few shades
+      // apart from the surface around them, so the broad shadow/highlight
+      // shaping above flattens them out: it works on the overall form, not
+      // on fine relief. Boosting each pixel against a blurred copy of its
+      // own neighbourhood (an unsharp mask) raises exactly that local
+      // relief and leaves the broad shading alone, which is what makes the
+      // detail read on every colour instead of only on dark pieces.
+      const cw = canvas.width, ch = canvas.height;
+      const lumBuf = new Float32Array(cw*ch);
+      for(let p=0, i=0; p<cw*ch; p++, i+=4){
+        lumBuf[p] = d[i+3] === 0 ? -1
+          : ((0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2]) / 255 - lumMin) / lumSpan;
+      }
+      const blurBuf = new Float32Array(cw*ch);
+      const R = 2 * SS;
+      for(let y=0;y<ch;y++){
+        for(let x=0;x<cw;x++){
+          const p = y*cw + x;
+          if(lumBuf[p] < 0){ blurBuf[p] = -1; continue; }
+          let sum = 0, n = 0;
+          for(let dy=-R; dy<=R; dy++){
+            const yy = y+dy; if(yy<0||yy>=ch) continue;
+            for(let dx=-R; dx<=R; dx++){
+              const xx = x+dx; if(xx<0||xx>=cw) continue;
+              const q = lumBuf[yy*cw + xx];
+              if(q < 0) continue;
+              sum += q; n++;
+            }
+          }
+          blurBuf[p] = n ? sum/n : lumBuf[p];
+        }
+      }
+      const detailGain = 1.15 * Math.min(2, Math.max(0.35, contrast));
+      for(let p=0, i=0; p<cw*ch; p++, i+=4){
         if(d[i+3] === 0) continue;
-        const lumRaw = (0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2]) / 255;
-        const lum = (lumRaw - lumMin) / lumSpan;
+        const base = lumBuf[p];
+        const lum = Math.max(0, Math.min(1, base + (base - blurBuf[p]) * detailGain));
         if(lum < anchor){
           // below the anchor everything darkens toward black — this is what
           // actually models a light piece, and still deepens a dark one
@@ -4901,8 +4943,13 @@
           // The horizontal round-off alone reads as a cylinder seen flat —
           // adding this makes the whole body read as a solid turned object.
           const relY = (y - topY) / bodyH;                  // 0 at the crown, 1 at the foot
-          const vert = 1 - Math.pow(relY, 2.0) * 0.42 * Math.min(1.6, contrast)
-                         + (1 - Math.min(1, relY * 3)) * 0.10 * Math.min(1.6, contrast);
+          // The downward fall-off needs the same light-piece guard as the
+          // side shading: at full strength it turned the lower half of a
+          // white piece grey while its top stayed white, so a white set
+          // looked like two different colours stacked together.
+          const vertAmt = 0.30 * Math.min(1.6, contrast) * Math.max(0.4, lightGuard);
+          const vert = 1 - Math.pow(relY, 2.0) * vertAmt
+                         + (1 - Math.min(1, relY * 3)) * 0.08 * Math.min(1.6, contrast) * Math.max(0.4, lightGuard);
           const mult = (1 + Math.max(-1, Math.min(1, cyl)) * cylAmt) * vert;
           d[idx]   = Math.max(0, Math.min(255, d[idx]   * mult));
           d[idx+1] = Math.max(0, Math.min(255, d[idx+1] * mult));
@@ -12709,7 +12756,7 @@
   // line tells us instantly whether the browser is running the current file
   // or a stale cached one — the difference between a real bug and a stale
   // deploy, which is otherwise impossible to tell apart from a screenshot.
-  const BUILD_VERSION = '2026-09-01 · 20';
+  const BUILD_VERSION = '2026-09-01 · 21';
   (function stampBuild(){
     const el = document.getElementById('build-stamp');
     if(el) el.textContent = 'CHESS 2 DOUBLE · build ' + BUILD_VERSION;
