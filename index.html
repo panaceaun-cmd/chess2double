@@ -4676,6 +4676,36 @@
   }
   // Solid-colour silhouette of whatever is drawn on `src` (canvas or image),
   // used to build the pack pieces' outline ring below.
+  // Luminance range of a whole material's artwork, measured once and reused
+  // for every piece in that set so they all share one shading curve.
+  let packLumRangeCache = {};
+  function packLumRange(mat){
+    if(packLumRangeCache[mat]) return packLumRangeCache[mat];
+    let min = 1, max = 0, seen = 0;
+    ['K','Q','R','B','N','P'].forEach(t => {
+      const img = piecePackTemplateImg(mat, t);
+      if(!img.complete || !img.naturalWidth) return;
+      try{
+        const c = document.createElement('canvas');
+        c.width = img.naturalWidth; c.height = img.naturalHeight;
+        const cx = c.getContext('2d');
+        cx.drawImage(img, 0, 0);
+        const px = cx.getImageData(0, 0, c.width, c.height).data;
+        for(let i=0;i<px.length;i+=4){
+          if(px[i+3] <= 10) continue;
+          const lum = (0.299*px[i] + 0.587*px[i+1] + 0.114*px[i+2]) / 255;
+          if(lum < min) min = lum;
+          if(lum > max) max = lum;
+        }
+        seen++;
+      }catch(e){}
+    });
+    const range = { min: seen ? min : 0, span: Math.max(0.05, (seen ? max : 1) - (seen ? min : 0)) };
+    // Only cache once every type has actually decoded, otherwise an early
+    // partial measurement would be locked in for the rest of the session.
+    if(seen === 6) packLumRangeCache[mat] = range;
+    return range;
+  }
   function silhouetteCanvas(src, w, h, color){
     const c = document.createElement('canvas');
     c.width = w; c.height = h;
@@ -4791,18 +4821,18 @@
       const depth = Math.min(0.97, 0.42 * contrast) * lightGuard;
       const gloss = Math.min(1, 0.34 * contrast);      // how hard the specular reads
       // The template's own luminance is heavily skewed bright — it was
-      // painted to read as white — so stretching the actual min–max
-      // luminance found in THIS piece to fill the full 0–1 range first
-      // means every target colour gets the same real spread of shadow
-      // through highlight.
-      let lumMin = 1, lumMax = 0;
-      for(let i=0;i<d.length;i+=4){
-        if(d[i+3] === 0) continue;
-        const lum = (0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2]) / 255;
-        if(lum < lumMin) lumMin = lum;
-        if(lum > lumMax) lumMax = lum;
-      }
-      const lumSpan = Math.max(0.05, lumMax - lumMin);
+      // painted to read as white — so it gets stretched to fill the full
+      // 0–1 range before shading. Crucially the range is measured ONCE per
+      // material across all six piece types, not per piece: the king and
+      // queen artwork carries darker shadows than the rest (min luminance
+      // 0.22/0.27 versus ~0.37 for rook, bishop, knight and pawn), so
+      // normalising each piece against its own range mapped those two onto
+      // a different curve — enough of their body landed past the specular
+      // threshold that a black king and queen came out visibly paler than
+      // the black pieces standing beside them. One shared range per set
+      // keeps every piece of a colour on the same curve.
+      const lumRange = packLumRange(mat);
+      const lumMin = lumRange.min, lumSpan = lumRange.span;
       for(let i=0;i<d.length;i+=4){
         if(d[i+3] === 0) continue;
         const lumRaw = (0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2]) / 255;
@@ -4865,14 +4895,14 @@
           // the same light-piece guard as the shadow depth above: without
           // it the round-off shading alone was enough to push a white
           // piece's shaded side down into grey territory
-          const cylAmt = Math.min(0.85, 0.26 * contrast) * Math.max(0.5, lightGuard);
+          const cylAmt = Math.min(0.85, 0.34 * contrast) * Math.max(0.55, lightGuard);
           // A second, vertical term: real pieces catch more light on their
           // upper surfaces and sit in their own contact shadow at the base.
           // The horizontal round-off alone reads as a cylinder seen flat —
           // adding this makes the whole body read as a solid turned object.
           const relY = (y - topY) / bodyH;                  // 0 at the crown, 1 at the foot
-          const vert = 1 - Math.pow(relY, 2.2) * 0.34 * Math.min(1.6, contrast)
-                         + (1 - Math.min(1, relY * 3)) * 0.07 * Math.min(1.6, contrast);
+          const vert = 1 - Math.pow(relY, 2.0) * 0.42 * Math.min(1.6, contrast)
+                         + (1 - Math.min(1, relY * 3)) * 0.10 * Math.min(1.6, contrast);
           const mult = (1 + Math.max(-1, Math.min(1, cyl)) * cylAmt) * vert;
           d[idx]   = Math.max(0, Math.min(255, d[idx]   * mult));
           d[idx+1] = Math.max(0, Math.min(255, d[idx+1] * mult));
@@ -12679,7 +12709,7 @@
   // line tells us instantly whether the browser is running the current file
   // or a stale cached one — the difference between a real bug and a stale
   // deploy, which is otherwise impossible to tell apart from a screenshot.
-  const BUILD_VERSION = '2026-09-01 · 19';
+  const BUILD_VERSION = '2026-09-01 · 20';
   (function stampBuild(){
     const el = document.getElementById('build-stamp');
     if(el) el.textContent = 'CHESS 2 DOUBLE · build ' + BUILD_VERSION;
