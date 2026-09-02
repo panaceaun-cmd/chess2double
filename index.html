@@ -4787,7 +4787,7 @@
       // Scaling the fall-off by how light the target already is keeps
       // white reading as white — its form comes from gentle shading rather
       // than heavy strokes — while dark pieces keep the full depth.
-      const lightGuard = 1 - 0.72 * targetLum;    // ~1 for black, ~0.31 for white
+      const lightGuard = 1 - 0.45 * targetLum;    // ~1 for black, ~0.57 for white
       const depth = Math.min(0.97, 0.42 * contrast) * lightGuard;
       const gloss = Math.min(1, 0.34 * contrast);      // how hard the specular reads
       // The template's own luminance is heavily skewed bright — it was
@@ -4841,6 +4841,14 @@
           }
         }
       }
+      // Vertical extent of the actual piece, for the top-lit / contact-shadow
+      // term below — the canvas itself has padding and headroom, so measuring
+      // the drawn rows is what keeps the gradient anchored to the piece.
+      let topY = -1, botY = -1;
+      for(let y=0;y<h;y++){
+        if(rowMin[y] !== -1){ if(topY === -1) topY = y; botY = y; }
+      }
+      const bodyH = Math.max(1, botY - topY);
       for(let y=0;y<h;y++){
         if(rowMin[y] === -1) continue;
         const span = rowMax[y] - rowMin[y];
@@ -4857,8 +4865,15 @@
           // the same light-piece guard as the shadow depth above: without
           // it the round-off shading alone was enough to push a white
           // piece's shaded side down into grey territory
-          const cylAmt = Math.min(0.85, 0.20 * contrast) * Math.max(0.35, lightGuard);
-          const mult = 1 + Math.max(-1, Math.min(1, cyl)) * cylAmt;
+          const cylAmt = Math.min(0.85, 0.26 * contrast) * Math.max(0.5, lightGuard);
+          // A second, vertical term: real pieces catch more light on their
+          // upper surfaces and sit in their own contact shadow at the base.
+          // The horizontal round-off alone reads as a cylinder seen flat —
+          // adding this makes the whole body read as a solid turned object.
+          const relY = (y - topY) / bodyH;                  // 0 at the crown, 1 at the foot
+          const vert = 1 - Math.pow(relY, 2.2) * 0.34 * Math.min(1.6, contrast)
+                         + (1 - Math.min(1, relY * 3)) * 0.07 * Math.min(1.6, contrast);
+          const mult = (1 + Math.max(-1, Math.min(1, cyl)) * cylAmt) * vert;
           d[idx]   = Math.max(0, Math.min(255, d[idx]   * mult));
           d[idx+1] = Math.max(0, Math.min(255, d[idx+1] * mult));
           d[idx+2] = Math.max(0, Math.min(255, d[idx+2] * mult));
@@ -12664,7 +12679,7 @@
   // line tells us instantly whether the browser is running the current file
   // or a stale cached one — the difference between a real bug and a stale
   // deploy, which is otherwise impossible to tell apart from a screenshot.
-  const BUILD_VERSION = '2026-09-01 · 18';
+  const BUILD_VERSION = '2026-09-01 · 19';
   (function stampBuild(){
     const el = document.getElementById('build-stamp');
     if(el) el.textContent = 'CHESS 2 DOUBLE · build ' + BUILD_VERSION;
