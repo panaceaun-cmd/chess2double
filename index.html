@@ -4698,16 +4698,37 @@
       const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const d = imgData.data;
       const target = hexToRgbArr(hex);
+      // Recolour with a 4-stop gradient (black → target → target → warm
+      // highlight) instead of scaling the target's own RGB by the
+      // template's brightness. A straight multiply compresses a dark
+      // target like black into a handful of RGB values a few points
+      // apart — flat, no shine, and adjacent black pieces became hard to
+      // tell apart. The template's own brightness skews high (it was
+      // painted to read as white), so blending most of that midtone
+      // range straight to a warm highlight — rather than holding it at
+      // the target colour — washed dark targets out toward grey instead
+      // of keeping them dark with a shine. Only the brightest pixels
+      // (genuine specular glints) now move toward the highlight, and only
+      // the darkest move toward black; the broad middle stays at the
+      // target's own colour, however dark that is.
+      const HI = [255, 240, 210];
+      const SHADOW_EDGE = 0.30, HILIGHT_EDGE = 0.78;
       for(let i=0;i<d.length;i+=4){
         if(d[i+3] === 0) continue;
-        // luminance-preserving recolour: the template's own shading
-        // (highlights/shadows) is kept, just retinted toward the chosen
-        // accent colour — the same trick used to fix the black/grey art.
         const lum = (0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2]) / 255;
-        const factor = 0.35 + 1.35*lum;
-        d[i]   = Math.min(255, target[0]*factor);
-        d[i+1] = Math.min(255, target[1]*factor);
-        d[i+2] = Math.min(255, target[2]*factor);
+        if(lum < SHADOW_EDGE){
+          const t = lum / SHADOW_EDGE;
+          d[i]   = target[0]*t;
+          d[i+1] = target[1]*t;
+          d[i+2] = target[2]*t;
+        } else if(lum > HILIGHT_EDGE){
+          const t = (lum - HILIGHT_EDGE) / (1 - HILIGHT_EDGE);
+          d[i]   = target[0] + (HI[0]-target[0])*t;
+          d[i+1] = target[1] + (HI[1]-target[1])*t;
+          d[i+2] = target[2] + (HI[2]-target[2])*t;
+        } else {
+          d[i] = target[0]; d[i+1] = target[1]; d[i+2] = target[2];
+        }
       }
       ctx.putImageData(imgData, 0, 0);
       if(outlinePx > 0){
@@ -12465,7 +12486,7 @@
   // line tells us instantly whether the browser is running the current file
   // or a stale cached one — the difference between a real bug and a stale
   // deploy, which is otherwise impossible to tell apart from a screenshot.
-  const BUILD_VERSION = '2026-09-01 · 11';
+  const BUILD_VERSION = '2026-09-01 · 12';
   (function stampBuild(){
     const el = document.getElementById('build-stamp');
     if(el) el.textContent = 'CHESS 2 DOUBLE · build ' + BUILD_VERSION;
