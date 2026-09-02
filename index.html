@@ -2052,7 +2052,7 @@
           <label for="ptt-mode-toggle-2" id="ptt-mode-label-2" style="cursor:pointer;">🎙️ Режим рации</label>
           <span id="ptt-mode-hint" style="font-size:11px; color:var(--ink-dim); width:100%;">Чтобы говорить — зажмите правую кнопку мыши или кнопку под доской</span>
         </div>
-        <div class="voice-chat-row" id="team-voice-row" style="display:none; align-items:center; gap:6px; font-size:12.5px; flex-wrap:wrap;">
+        <div class="voice-chat-row" id="team-voice-row" style="display:flex; align-items:center; gap:6px; font-size:12.5px; flex-wrap:wrap;">
           <input type="checkbox" id="team-voice-toggle">
           <label for="team-voice-toggle" id="team-voice-label" style="cursor:pointer;">👥 Отдельная связь между напарниками</label>
           <span id="team-voice-hint" style="font-size:11px; color:var(--ink-dim); width:100%;">Слышно только напарников — соперники общаются отдельно.</span>
@@ -3134,6 +3134,8 @@
         mode = m;
         renderModeMenu();
         populateChatSenders();
+        // whether teammates exist at all depends on the mode
+        try{ updateTeamVoiceRow(); }catch(e){}
         newGame();
       });
       wrap.appendChild(card);
@@ -8198,8 +8200,6 @@
     stopTeamVoiceRequestListener();
     stopRematchListener();
     stopConnectionWatcher();
-    const teamVoiceRow = document.getElementById('team-voice-row');
-    if(teamVoiceRow) teamVoiceRow.style.display = 'none';
     hideIncomingCallModal();
     voiceCallState = null;
     const voiceBtn = document.getElementById('voice-chat-btn');
@@ -8211,6 +8211,7 @@
     document.getElementById('mode-select').style.opacity = '';
     document.getElementById('mode-select').style.pointerEvents = '';
     updateOnlineBar();
+    updateTeamVoiceRow();
     newGame();
   }
   // ================= END ONLINE / LOBBY =================
@@ -9391,6 +9392,9 @@
   // touches the row, so the binding must already exist by then.
   var teamVoiceOnly = false;
   try{ teamVoiceOnly = localStorage.getItem('chess2-team-voice') === '1'; }catch(e){}
+  // applyLang() already drew this row before the saved value was read, so
+  // bring the checkbox back in line with what was actually stored
+  setTimeout(() => { try{ updateTeamVoiceRow(); }catch(e){} }, 0);
 
   function seatTeamOf(seat){
     const num = parseInt(String(seat || '').slice(1));
@@ -9401,11 +9405,21 @@
   function otherSeatsInRoom(){
     return Object.keys(onlinePlayers).filter(s => s !== onlineSide && onlinePlayers[s]);
   }
+  // teams only exist in the 2-vs-2 and 1-vs-2 modes; 2p, free-for-all and
+  // training have nothing to split the channel along
+  function teamVoiceModeHasTeams(){
+    return mode === '4p' || mode === '3p';
+  }
   function hasTeamPartners(){
-    if(!onlineRoomId || mode === 'ffa') return false;
+    if(!teamVoiceModeHasTeams()) return false;
+    // not seated yet — the switch is a table setting you choose BEFORE
+    // inviting anyone, and it travels with the room to whoever joins
+    if(!onlineRoomId || !onlineSide) return true;
     const myTeam = seatTeamOf(onlineSide);
     if(!myTeam) return false;
-    return otherSeatsInRoom().some(s => seatTeamOf(s) === myTeam);
+    const others = otherSeatsInRoom();
+    if(others.length === 0) return true; // room still filling up
+    return others.some(s => seatTeamOf(s) === myTeam);
   }
   // which seats my microphone should actually reach. If teammate-only is on
   // but there is nobody on my side (free-for-all, or I'm the lone player
@@ -9422,15 +9436,15 @@
     const box = document.getElementById('team-voice-toggle');
     const hint = document.getElementById('team-voice-hint');
     if(!row || !box) return;
-    const available = !!onlineRoomId && onlineMaxPlayers > 2;
-    row.style.display = available ? 'flex' : 'none';
-    if(!available) return;
+    // always on screen, online or not — it's meant to be set up before you
+    // invite anyone, not discovered halfway through a game
+    row.style.display = 'flex';
     box.checked = !!teamVoiceOnly;
-    const partners = hasTeamPartners();
+    const usable = hasTeamPartners();
     // no one to talk to privately — leave the switch visible but inert so
     // the reason is on screen instead of nothing happening
-    box.disabled = !partners;
-    if(hint) hint.textContent = partners ? t('teamVoiceHint') : t('teamVoiceNoPartners');
+    box.disabled = !usable;
+    if(hint) hint.textContent = usable ? t('teamVoiceHint') : t('teamVoiceNoPartners');
   }
   // rebuild the mesh so it matches the new scope; people already talking get
   // reconnected to the right subset instead of having to rejoin by hand
