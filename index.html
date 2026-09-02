@@ -615,14 +615,14 @@
     box-shadow:inset 0 0 0 1px rgba(255,226,160,.06);
   }
   #board.board3d .piece{
-    transform:rotateX(var(--piece-stand));
+    transform:rotateX(var(--piece-stand)) scale(var(--piece-tilt-scale, 1));
     transform-origin:50% 100%;
     filter:
       drop-shadow(0 0 1px rgba(0,0,0,.95))
       drop-shadow(0 1px 1px rgba(0,0,0,.55))
       drop-shadow(0 10px 7px rgba(0,0,0,.45));
   }
-  #board.board3d .piece.face-far{ transform:rotateX(var(--piece-stand)) rotate(180deg); }
+  #board.board3d .piece.face-far{ transform:rotateX(var(--piece-stand)) scale(var(--piece-tilt-scale, 1)) rotate(180deg); }
   /* Real 3D models: the sprite is an image standing on the square, so it is
      positioned absolutely and allowed to rise well above its own square —
      a king overlaps the ranks behind it exactly like a physical piece.
@@ -641,7 +641,7 @@
   }
   /* A model that has been turned to face the other player is mirrored, not
      flipped upside down like a flat glyph would be. */
-  #board.board3d .piece.piece3d.face-far, #board.board3d .piece.piece-vec.face-far{ transform:rotateX(var(--piece-stand)) scaleX(-1); }
+  #board.board3d .piece.piece3d.face-far, #board.board3d .piece.piece-vec.face-far{ transform:rotateX(var(--piece-stand)) scale(var(--piece-tilt-scale, 1)) scaleX(-1); }
   /* Models carry their own contour, so they need only a tight contact
      shadow — the wide soft glow used for glyphs blurs their edges. */
   #board.board3d .piece.piece3d, #board.board3d .piece.piece-vec{
@@ -4776,6 +4776,28 @@
   // angle the board is actually drawn at.
   const TILT_MIN = 10, TILT_MAX = 70, TILT_STEP = 5, TILT_DEFAULT = 45;
   let boardTilt3D = TILT_DEFAULT;
+  // The board's own 3D perspective naturally makes pieces look SHORTER at a
+  // shallow tilt (closer to a top-down view, where a piece's standing
+  // height is foreshortened toward the camera) and TALLER at a steep tilt
+  // (closer to eye-level, where the standing height projects almost fully
+  // onto the screen) — normal, physically-correct 3D perspective. The
+  // brief was to flip that relationship: shallow tilt should look tallest,
+  // steep tilt shortest. That reversal is applied as an extra explicit
+  // scale on top of the natural transform. Because this scale is applied
+  // inside the same rotateX'd, perspective-projected space rather than in
+  // flat 2D, its effect on final on-screen size is NOT the same multiplier
+  // — an early attempt at deriving it from two measured pixel heights
+  // (expecting a simple ratio) actually produced pieces 3x taller than
+  // intended once reprojected. These two endpoint values were reached by
+  // testing against the actual rendered result instead, and are deliberately
+  // conservative so the reversal is visible without pieces swallowing the
+  // ranks behind them.
+  const TILT_SCALE_AT_MIN = 1.22, TILT_SCALE_AT_MAX = 0.82;
+  function pieceTiltScale(){
+    const t = Math.max(TILT_MIN, Math.min(TILT_MAX, boardTilt3D));
+    const frac = (t - TILT_MIN) / (TILT_MAX - TILT_MIN);
+    return +(TILT_SCALE_AT_MIN + (TILT_SCALE_AT_MAX - TILT_SCALE_AT_MIN) * frac).toFixed(4);
+  }
   try{
     const savedTilt = parseFloat(localStorage.getItem('chess2-board-tilt'));
     if(isFinite(savedTilt)) boardTilt3D = Math.max(TILT_MIN, Math.min(TILT_MAX, savedTilt));
@@ -4793,6 +4815,7 @@
       // inverts with it — same rule as the --piece-stand CSS variable.
       const stand = isBoardCurrentlyFlipped() ? boardTilt3D : -boardTilt3D;
       parts.push('rotateX(' + stand + 'deg)');
+      parts.push('scale(' + pieceTiltScale() + ')');
     }
     if(el && el.classList.contains('face-far')){
       // A flat glyph is flipped 180° to "face" the opposite player, but a
@@ -4845,6 +4868,7 @@
     const stand = isBoardCurrentlyFlipped() ? boardTilt3D : -boardTilt3D;
     boardEl.style.setProperty('--board-tilt', boardTilt3D + 'deg');
     boardEl.style.setProperty('--piece-stand', stand + 'deg');
+    boardEl.style.setProperty('--piece-tilt-scale', String(pieceTiltScale()));
   }
 
   function applyBoardTilt(deg, save){
@@ -12414,7 +12438,7 @@
   // line tells us instantly whether the browser is running the current file
   // or a stale cached one — the difference between a real bug and a stale
   // deploy, which is otherwise impossible to tell apart from a screenshot.
-  const BUILD_VERSION = '2026-09-01 · 8';
+  const BUILD_VERSION = '2026-09-01 · 9';
   (function stampBuild(){
     const el = document.getElementById('build-stamp');
     if(el) el.textContent = 'CHESS 2 DOUBLE · build ' + BUILD_VERSION;
