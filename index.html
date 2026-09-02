@@ -4628,6 +4628,20 @@
   // ~8% brings that to a full 1.2× over the bishop, matching normal set
   // proportions, in both the flat and standing renders.
   const PIECE_PACK_TYPE_SCALE = { K: 1.0773, Q: 1.0773 };
+  // Calibrated against the procedural 3D models: they're all drawn on ONE
+  // fixed canvas (a 1.45×2.60-square box), and each piece type fills only
+  // as much of it as its own real height calls for — a king reaches about
+  // 65% of that canvas, a pawn only about 39%. That shared reference is
+  // what gives the standing pieces their believable size relative to each
+  // other. Fixing this pack's own art snugly around each piece's own
+  // silhouette got the shape right but broke that shared reference: every
+  // type (not just the king) then stretched to nearly fill the CSS box on
+  // its own, so a pawn ended up standing as tall as a king. Anchoring every
+  // type to one shared canvas — sized off the king so it reaches that same
+  // ~65% — restores it: only the king reaches near the top, and every
+  // other type's own natural height decides how far up it reaches, just
+  // like the procedural models.
+  const PIECE_PACK_KING_FILL = 0.6466;
   function piecePackSprite(type, colorKey){
     const mat = PACK_STYLES[pieceStyle];
     if(!mat) return '';
@@ -4636,16 +4650,6 @@
     if(!img.complete || !img.naturalWidth) return '';   // not decoded yet — render() re-runs onload
     const hex = (getComputedStyle(document.documentElement)
       .getPropertyValue('--accent-' + CSSCOLOR[colorKey]) || '').trim() || DEFAULT_ACCENT[colorKey];
-    // The 3D board stands every piece up in a tall box (~1.45 squares wide,
-    // 2.60 tall — the same shape the procedural models fill). This pack's
-    // artwork is cropped tight to each piece's own silhouette, whose width
-    // ratio rarely matches that box: contain-fitting the tight crop straight
-    // into it either stretched pieces abnormally wide (rooks, whose own
-    // ratio happens to be close to the box's) or left them floating with
-    // empty headroom (queens/kings, narrower than the box). Baking the
-    // piece onto a canvas already shaped like that box — before the CSS
-    // box ever sees it — means every piece reaches the box's full height at
-    // its own natural width, instead of the box's shape fighting the art.
     const tall = !!view3D;
     const key = mat + '|' + t + '|' + hex + '|o' + outline3dColor + ':' + outline3dWidth + (tall ? '|tall' : '|sq');
     if(piecePackTintCache[key]) return piecePackTintCache[key];
@@ -4660,8 +4664,11 @@
       let canvasW, canvasH, drawX, drawY;
       if(tall){
         const boxRatio = 1.45 / 2.60;   // same width:height shape as the CSS standing box
-        canvasH = pieceH + pad*2;
-        canvasW = Math.max(pieceW + pad*2, canvasH * boxRatio);
+        const kingImg = piecePackTemplateImg(mat, 'K');
+        const kingH = (kingImg.complete && kingImg.naturalHeight ? kingImg.naturalHeight : img.naturalHeight)
+          * (PIECE_PACK_TYPE_SCALE.K || 1);
+        canvasH = kingH / PIECE_PACK_KING_FILL + pad*2;
+        canvasW = canvasH * boxRatio;
         drawX = (canvasW - pieceW) / 2;
         drawY = canvasH - pieceH - pad;   // bottom-anchored: the piece stands on its square
       } else {
@@ -12438,7 +12445,7 @@
   // line tells us instantly whether the browser is running the current file
   // or a stale cached one — the difference between a real bug and a stale
   // deploy, which is otherwise impossible to tell apart from a screenshot.
-  const BUILD_VERSION = '2026-09-01 · 9';
+  const BUILD_VERSION = '2026-09-01 · 10';
   (function stampBuild(){
     const el = document.getElementById('build-stamp');
     if(el) el.textContent = 'CHESS 2 DOUBLE · build ' + BUILD_VERSION;
