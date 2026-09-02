@@ -4620,6 +4620,13 @@
     return c;
   }
   let piecePackTintCache = {};
+  // Chess sets are normally proportioned so the queen and king stand
+  // noticeably taller than the officers beside them. This pack's own
+  // artwork has them only slightly taller (king/queen ≈88px vs the
+  // bishop's ≈79px — about 1.11×). Scaling just those two up a further
+  // ~8% brings that to a full 1.2× over the bishop, matching normal set
+  // proportions, in both the flat and standing renders.
+  const PIECE_PACK_TYPE_SCALE = { K: 1.0773, Q: 1.0773 };
   function piecePackSprite(type, colorKey){
     const mat = PACK_STYLES[pieceStyle];
     if(!mat) return '';
@@ -4628,19 +4635,44 @@
     if(!img.complete || !img.naturalWidth) return '';   // not decoded yet — render() re-runs onload
     const hex = (getComputedStyle(document.documentElement)
       .getPropertyValue('--accent-' + CSSCOLOR[colorKey]) || '').trim() || DEFAULT_ACCENT[colorKey];
-    const key = mat + '|' + t + '|' + hex + '|o' + outline3dColor + ':' + outline3dWidth;
+    // The 3D board stands every piece up in a tall box (~1.45 squares wide,
+    // 2.60 tall — the same shape the procedural models fill). This pack's
+    // artwork is cropped tight to each piece's own silhouette, whose width
+    // ratio rarely matches that box: contain-fitting the tight crop straight
+    // into it either stretched pieces abnormally wide (rooks, whose own
+    // ratio happens to be close to the box's) or left them floating with
+    // empty headroom (queens/kings, narrower than the box). Baking the
+    // piece onto a canvas already shaped like that box — before the CSS
+    // box ever sees it — means every piece reaches the box's full height at
+    // its own natural width, instead of the box's shape fighting the art.
+    const tall = !!view3D;
+    const key = mat + '|' + t + '|' + hex + '|o' + outline3dColor + ':' + outline3dWidth + (tall ? '|tall' : '|sq');
     if(piecePackTintCache[key]) return piecePackTintCache[key];
     let url = '';
     try{
-      const w = img.naturalWidth, h = img.naturalHeight;
+      const scale = PIECE_PACK_TYPE_SCALE[t] || 1;
+      const pieceW = img.naturalWidth * scale, pieceH = img.naturalHeight * scale;
       // outline width uses the same 0-8 slider as the 3D models; scaled down
       // to match this artwork's much smaller native resolution
-      const outlinePx = outline3dWidth > 0 ? Math.max(1, Math.round(outline3dWidth * (h / 260))) : 0;
+      const outlinePx = outline3dWidth > 0 ? Math.max(1, Math.round(outline3dWidth * (pieceH / 260))) : 0;
       const pad = outlinePx + 2;
+      let canvasW, canvasH, drawX, drawY;
+      if(tall){
+        const boxRatio = 1.45 / 2.60;   // same width:height shape as the CSS standing box
+        canvasH = pieceH + pad*2;
+        canvasW = Math.max(pieceW + pad*2, canvasH * boxRatio);
+        drawX = (canvasW - pieceW) / 2;
+        drawY = canvasH - pieceH - pad;   // bottom-anchored: the piece stands on its square
+      } else {
+        canvasW = pieceW + pad*2;
+        canvasH = pieceH + pad*2;
+        drawX = pad;
+        drawY = pad;
+      }
       const canvas = document.createElement('canvas');
-      canvas.width = w + pad*2; canvas.height = h + pad*2;
+      canvas.width = Math.round(canvasW); canvas.height = Math.round(canvasH);
       const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, pad, pad);
+      ctx.drawImage(img, drawX, drawY, pieceW, pieceH);
       const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const d = imgData.data;
       const target = hexToRgbArr(hex);
@@ -12381,7 +12413,7 @@
   // line tells us instantly whether the browser is running the current file
   // or a stale cached one — the difference between a real bug and a stale
   // deploy, which is otherwise impossible to tell apart from a screenshot.
-  const BUILD_VERSION = '2026-09-01 · 6';
+  const BUILD_VERSION = '2026-09-01 · 7';
   (function stampBuild(){
     const el = document.getElementById('build-stamp');
     if(el) el.textContent = 'CHESS 2 DOUBLE · build ' + BUILD_VERSION;
