@@ -646,6 +646,26 @@
   }
   /* A model that has been turned to face the other player is mirrored, not
      flipped upside down like a flat glyph would be. */
+  /* ---- flipped board: move the pivot to the near edge of the square ----
+     A standing piece pivots on one edge of its square and its body always
+     projects up-screen from there. .flip180 turns the board 180° in its own
+     plane, which swaps a square's edges on screen: its board-local BOTTOM
+     edge lands at the square's SCREEN TOP. --piece-stand was already inverted
+     for that; the anchor was not. So on a flipped board every piece pivoted
+     on the FAR edge and drew itself one full rank high, leaving the back rank
+     looking empty — exactly what the flipped screenshots show, while the
+     unflipped ones are correct.
+     The pivot must therefore sit on the square's board-local TOP edge here.
+     Note it is the ANCHOR that moves, not transform-origin: the sprite box is
+     2.6 squares tall and hangs BELOW its own top edge, so pivoting on
+     `transform-origin:50% 0%` would swing the whole box far under the board.
+     Keeping the pivot at the box's bottom and lifting the box one square
+     (bottom:100%) puts it on the near edge with the sprite still drawn at it. */
+  #board.board3d.flip180 .piece.piece3d,
+  #board.board3d.flip180 .piece.piece-vec{ bottom:100%; }
+  /* Flat glyphs fill exactly one square, so for them moving transform-origin
+     to the local top edge shifts the pivot by one square and nothing more. */
+  #board.board3d.flip180 .piece:not(.piece3d):not(.piece-vec){ transform-origin:50% 0%; }
   #board.board3d .piece.piece3d.face-far, #board.board3d .piece.piece-vec.face-far{ transform:rotateX(var(--piece-stand)) translateY(var(--piece-seat, 0%)) scale(var(--piece-tilt-scale, 1)) scale(var(--piece-extra-scale, 1)) scaleX(-1); }
   /* Cancelling the board flip in 3D. Flat glyphs turn a full 180°, exactly
      as before. Models keep the mirror here: in 3D their transform-origin is
