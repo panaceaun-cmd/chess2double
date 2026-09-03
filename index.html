@@ -646,23 +646,6 @@
   }
   /* A model that has been turned to face the other player is mirrored, not
      flipped upside down like a flat glyph would be. */
-  /* ---- flipped board: mirror the ANCHOR as well as the angle ----
-     A standing piece pivots on the edge of its square that faces the camera,
-     and its body always projects up-screen from that pivot. .flip180 rotates
-     the board 180° in its own plane, which maps a square's board-local BOTTOM
-     edge onto its SCREEN TOP edge. --piece-stand was already inverted for
-     that, but `bottom:0` and `transform-origin:50% 100%` were not — so on a
-     flipped board every piece pivoted on the FAR edge of its square and drew
-     itself one full rank higher, leaving the back rank looking empty. This is
-     why only the players whose board is flipped (seats p2/p4 online, and
-     anyone after a seat swap that moves them to the other side) ever saw it.
-     Mirroring the anchor and the pivot puts them back on the near edge. */
-  #board.board3d.flip180 .piece{ transform-origin:50% 0%; }
-  #board.board3d.flip180 .piece.piece3d,
-  #board.board3d.flip180 .piece.piece-vec{
-    bottom:auto; top:0;
-    background-position:center top;
-  }
   #board.board3d .piece.piece3d.face-far, #board.board3d .piece.piece-vec.face-far{ transform:rotateX(var(--piece-stand)) translateY(var(--piece-seat, 0%)) scale(var(--piece-tilt-scale, 1)) scale(var(--piece-extra-scale, 1)) scaleX(-1); }
   /* Cancelling the board flip in 3D. Flat glyphs turn a full 180°, exactly
      as before. Models keep the mirror here: in 3D their transform-origin is
@@ -736,8 +719,6 @@
     100%{ transform:rotateX(var(--piece-stand)) translateY(var(--piece-seat, 0%)) scale(1) rotate(0deg); }
   }
   #board.board3d .captured-piece-ghost{ animation-name:pieceFallOver3d; transform-origin:50% 100%; }
-  /* the falling ghost pivots on the near edge too — same mirroring as above */
-  #board.board3d.flip180 .captured-piece-ghost{ transform-origin:50% 0%; }
   @keyframes pieceFallOver3d{
     0%{ transform:translate(0,0) rotateX(var(--piece-stand)) translateY(var(--piece-seat, 0%)) rotate(0deg) scale(1); opacity:1; }
     100%{ transform:translate(var(--fall-x,26px), 46px) rotateX(var(--piece-stand)) translateY(var(--piece-seat, 0%)) rotate(var(--fall-rot,110deg)) scale(.65); opacity:0; }
