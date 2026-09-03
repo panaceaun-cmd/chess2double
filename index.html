@@ -630,7 +630,14 @@
      treatment here so they look consistent with the procedural models
      instead of lying flat while everything else stands up. */
   #board.board3d .piece.piece3d, #board.board3d .piece.piece-vec{
-    position:absolute; left:-22.5%; right:-22.5%; bottom:0;
+    /* The sprite is sized by its WIDTH here (background-size:contain in a box
+       far taller than it is wide), so this inset is what controls how tall a
+       piece draws. At -22.5% the box was 145% of a square wide, and because
+       the board is foreshortened by rotateX while the piece is not, that came
+       out roughly a whole rank of overhang — a piece on rank 8 read as
+       standing on rank 7. -10% keeps a physical piece's slight overlap of the
+       rank behind it without moving it off its own square. */
+    position:absolute; left:-10%; right:-10%; bottom:0;
     height:260%;
     background-repeat:no-repeat;
     background-position:center bottom;
@@ -642,6 +649,14 @@
   /* A model that has been turned to face the other player is mirrored, not
      flipped upside down like a flat glyph would be. */
   #board.board3d .piece.piece3d.face-far, #board.board3d .piece.piece-vec.face-far{ transform:rotateX(var(--piece-stand)) scale(var(--piece-tilt-scale, 1)) scale(var(--piece-extra-scale, 1)) scaleX(-1); }
+  /* Cancelling the board flip in 3D. Flat glyphs turn a full 180°, exactly
+     as before. Models keep the mirror here: in 3D their transform-origin is
+     the square's bottom edge (they stand on it), and a 180° turn about that
+     point would swing the piece below its own square. The 2D rule above is
+     where the upside-down sprites actually came from. */
+  #board.board3d .piece.face-counter{ transform:rotateX(var(--piece-stand)) scale(var(--piece-tilt-scale, 1)) scale(var(--piece-extra-scale, 1)) rotate(180deg); }
+  #board.board3d .piece.piece3d.face-counter,
+  #board.board3d .piece.piece-vec.face-counter{ transform:rotateX(var(--piece-stand)) scale(var(--piece-tilt-scale, 1)) scale(var(--piece-extra-scale, 1)) scaleX(-1); }
   /* Models carry their own contour, so they need only a tight contact
      shadow — the wide soft glow used for glyphs blurs their edges. */
   #board.board3d .piece.piece3d, #board.board3d .piece.piece-vec{
@@ -730,6 +745,14 @@
   /* A model turned to face the other player is mirrored, never flipped
      upside down the way a flat glyph is. */
   .piece.piece3d.face-far, .piece.piece-vec.face-far{ transform:scaleX(-1); }
+  /* face-counter is a DIFFERENT job: it cancels the board's own 180° .flip180
+     rotation so pieces stay upright for a player whose side is at the top.
+     A mirror cannot undo a rotation, so models must rotate here too —
+     using scaleX(-1) for this case is what left every sprite upside down on
+     a flipped board. */
+  .piece.face-counter,
+  .piece.piece3d.face-counter,
+  .piece.piece-vec.face-counter{ transform:rotate(180deg); }
 
   #board.board3d .coord-cell{ backface-visibility:hidden; }
   /* Tilt controls — only meaningful in 3D, so hidden entirely in 2D.
@@ -5119,7 +5142,13 @@
         parts.push('scale(0.85)');
       }
     }
-    if(el && el.classList.contains('face-far')){
+    if(el && el.classList.contains('face-counter')){
+      // Undoing the board's own 180° rotation. In 3D a model stands on the
+      // square's bottom edge (transform-origin 50% 100%), so a real turn
+      // would swing it below its square — it mirrors there instead, which is
+      // exactly what the matching CSS rule does. Anywhere else it's a turn.
+      parts.push((view3D && isModel) ? 'scaleX(-1)' : 'rotate(180deg)');
+    } else if(el && el.classList.contains('face-far')){
       // A flat glyph is flipped 180° to "face" the opposite player, but a
       // real 3D model must not be turned upside down — a physical piece
       // that has been turned around is mirrored, not inverted.
@@ -11068,7 +11097,7 @@
     // square afterward, at 2 squares/second. See lastAnimatedMoveRef above
     // for why lastMove is compared by reference here.
     let animateFromRect = null;
-    let capturedWasFaceFar = false;
+    let capturedWasFaceFar = '';
     const isNewMove = !!(lastMove && lastMove !== lastAnimatedMoveRef);
     if(isNewMove){
       const fromSq = boardEl.querySelector('.sq[data-r="' + lastMove.from.r + '"][data-c="' + lastMove.from.c + '"]');
@@ -11079,7 +11108,12 @@
       if(lastMove.capture){
         const toSqBefore = boardEl.querySelector('.sq[data-r="' + lastMove.to.r + '"][data-c="' + lastMove.to.c + '"]');
         const capturedPieceEl = toSqBefore ? toSqBefore.querySelector('.piece') : null;
-        capturedWasFaceFar = !!(capturedPieceEl && capturedPieceEl.classList.contains('face-far'));
+        // carry over whichever orientation class the real piece had, so the
+        // ghost doesn't snap upright (or upside down) the moment it spawns
+        capturedWasFaceFar = capturedPieceEl
+          ? (capturedPieceEl.classList.contains('face-counter') ? 'face-counter'
+             : (capturedPieceEl.classList.contains('face-far') ? 'face-far' : ''))
+          : '';
       }
     }
 
@@ -11132,14 +11166,21 @@
 
         const piece = board[r][c];
         if(piece){
-          let rotate;
-          if(onlineRoomId) rotate=flipBoard;
-          else if(orientationMode===1) rotate=false;
-          else if(orientationMode===2) rotate=true;
-          else if(orientationMode===3) rotate=(piece.color==='b'||piece.color==='g');
-          else rotate=flipBoard;
+          // Two separate things, previously conflated into one class:
+          //  faceFar     — this piece faces the OTHER player on a board that
+          //                is not rotated (a model gets mirrored for this).
+          //  counterFlip — the board itself is rotated 180°, so the piece has
+          //                to be turned back to stay upright (always a real
+          //                rotation, models included).
+          let faceFar = false, counterFlip = false;
+          if(onlineRoomId) counterFlip = flipBoard;
+          else if(orientationMode===1) { /* everything faces the near player */ }
+          else if(orientationMode===2) faceFar = true;
+          else if(orientationMode===3) faceFar = (piece.color==='b'||piece.color==='g');
+          else counterFlip = flipBoard;
           const span = document.createElement('span');
-          span.className = 'piece ' + CSSCOLOR[piece.color] + ' pstyle-' + pieceStyle + (rotate?' face-far':'');
+          span.className = 'piece ' + CSSCOLOR[piece.color] + ' pstyle-' + pieceStyle +
+            (faceFar ? ' face-far' : '') + (counterFlip ? ' face-counter' : '');
           span.textContent = GLYPH[piece.color][piece.type];
           span.dataset.glyph = GLYPH[piece.color][piece.type];
           if(usePiecePack()){
@@ -11317,7 +11358,7 @@
   // triggered on it later, at the actual moment of impact.
   function spawnStandingCapturedGhost(parentSq, move, wasFaceFar){
     const ghost = document.createElement('span');
-    ghost.className = 'piece captured-piece-ghost ' + CSSCOLOR[move.capturedColor] + (wasFaceFar ? ' face-far' : '');
+    ghost.className = 'piece captured-piece-ghost ' + CSSCOLOR[move.capturedColor] + (wasFaceFar ? ' ' + wasFaceFar : '');
     ghost.textContent = GLYPH[move.capturedColor][move.capturedType];
     if(usePiecePack()){
       const sprite = piecePackSprite(move.capturedType, move.capturedColor);
