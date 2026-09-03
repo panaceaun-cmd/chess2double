@@ -3571,25 +3571,14 @@
     roomColorNames[colorKey] = customColorNames[colorKey];
     pushStyleChangeIfOnline();
   }
-  // Guard for the one direction that must NOT feed back: the shared 3D
-  // outline control calls applyOutline*() for all four colours, and those
-  // would otherwise write straight back into it and drift on rounding.
-  let outlineSyncingFromShared = false;
   function applyOutlineWidth(colorKey, px, save){
     document.documentElement.style.setProperty('--piece-stroke-w-' + CSSCOLOR[colorKey], px + 'px');
-    // The per-colour outline sliders only ever drove -webkit-text-stroke,
-    // which is a TEXT property — it does nothing to the sprite styles (3D
-    // Wood, Marble, Plastic, Rust and now 3D High quality), whose outline is
-    // drawn into the sprite from outline3dWidth/outline3dColor. That is why
-    // moving these sliders appeared to do nothing on those styles. Mirroring
-    // the change across and dropping the cached sprites makes them respond.
-    if(!outlineSyncingFromShared){
-      outline3dWidth = Math.max(0, Math.min(8, (px / 3) * 8));
-      try{ localStorage.setItem('chess2-outline3d-width', String(outline3dWidth)); }catch(e){}
-      const sharedW = document.getElementById('outline3d-width');
-      if(sharedW) sharedW.value = String(outline3dWidth);
-      try{ invalidatePiece3D(); }catch(e){}
-    }
+    // Sprite and model styles read this colour's outline out of the CSS
+    // variable set just above (see outlineForColor), so the slider now
+    // reaches them — but only for THIS colour. Dropping the cached sprites is
+    // what makes the change show up; nothing is written back into the shared
+    // control, or one colour's change would land on all four again.
+    try{ invalidatePiece3D(); }catch(e){}
     const label = document.getElementById('ol-value-' + colorKey);
     if(label) label.textContent = px + 'px';
     const range = document.getElementById('piece-outline-width-' + colorKey);
@@ -3601,15 +3590,8 @@
   }
   function applyOutlineColor(colorKey, hex, save){
     document.documentElement.style.setProperty('--piece-stroke-color-' + CSSCOLOR[colorKey], hex);
-    // same reason as applyOutlineWidth(): sprite styles need the colour in
-    // outline3dColor, not in a CSS text-stroke property they never read
-    if(!outlineSyncingFromShared){
-      outline3dColor = hex;
-      try{ localStorage.setItem('chess2-outline3d-color', outline3dColor); }catch(e){}
-      const sharedC = document.getElementById('outline3d-color');
-      if(sharedC) sharedC.value = hex;
-      try{ invalidatePiece3D(); }catch(e){}
-    }
+    // same as applyOutlineWidth(): per colour, and only this colour
+    try{ invalidatePiece3D(); }catch(e){}
     const input = document.getElementById('piece-outline-color-' + colorKey);
     if(input) input.value = hex;
     if(save){ try{ localStorage.setItem('chess2-outline-color-' + colorKey, hex); }catch(e){} }
@@ -4715,8 +4697,31 @@
   const PIECE3D_RES = IS_SMALL_SCREEN ? 192 : 320;
   try{ Piece3D.setLowDetail(IS_SMALL_SCREEN); }catch(e){}
   // One outline setting shared by every piece in both 3D styles.
+  // "Обводка всех фигур": the shared control. It sets all four at once by
+  // writing through to the per-colour values below, and is only a starting
+  // point — the per-colour sliders override it individually.
   let outline3dColor = '#141414';
   let outline3dWidth = 2;
+  // The per-colour outline lives in the SAME CSS variables the glyph styles
+  // read (--piece-stroke-w-* / --piece-stroke-color-*), so one set of sliders
+  // drives every style. Sprite styles used to read the shared value instead,
+  // which is why changing one colour's outline changed all four.
+  // The glyph sliders run 0–3px; the sprite/model outline expects 0–8, hence
+  // the scaling.
+  function outlineForColor(colorKey){
+    const css = CSSCOLOR[colorKey];
+    let raw = '', hex = '';
+    try{
+      const cs = getComputedStyle(document.documentElement);
+      raw = cs.getPropertyValue('--piece-stroke-w-' + css);
+      hex = (cs.getPropertyValue('--piece-stroke-color-' + css) || '').trim();
+    }catch(e){}
+    const px = parseFloat(raw);
+    return {
+      px: isFinite(px) ? Math.max(0, Math.min(8, (px / 3) * 8)) : outline3dWidth,
+      color: hex || outline3dColor
+    };
+  }
   // Contrast for the Marble/Wood/Plastic/Rust image-pack recolour (the
   // shadow → base → highlight blend and the cylindrical side-shading) —
   // 1 is the default strength, lower flattens it, higher deepens it.
@@ -4847,7 +4852,8 @@
     const hex = (getComputedStyle(document.documentElement)
       .getPropertyValue('--accent-' + CSSCOLOR[colorKey]) || '').trim() || DEFAULT_ACCENT[colorKey];
     const tall = !!view3D;
-    const key = mat + '|' + t + '|' + hex + '|o' + outline3dColor + ':' + outline3dWidth + '|c' + pieceDetailContrast + (tall ? '|tall' : '|sq');
+    const ol = outlineForColor(colorKey);   // this colour's own outline
+    const key = mat + '|' + t + '|' + hex + '|o' + ol.color + ':' + ol.px + '|c' + pieceDetailContrast + (tall ? '|tall' : '|sq');
     if(piecePackTintCache[key]) return piecePackTintCache[key];
     let url = '';
     try{
@@ -4863,7 +4869,7 @@
       const pieceW = img.naturalWidth * scale, pieceH = img.naturalHeight * scale;
       // outline width uses the same 0-8 slider as the 3D models; scaled down
       // to match this artwork's much smaller native resolution
-      const outlinePx = outline3dWidth > 0 ? Math.max(1, Math.round(outline3dWidth * (pieceH / 260))) : 0;
+      const outlinePx = ol.px > 0 ? Math.max(1, Math.round(ol.px * (pieceH / 260))) : 0;
       const pad = outlinePx + 2*SS;
       let canvasW, canvasH, drawX, drawY;
       if(tall){
@@ -5058,7 +5064,7 @@
       }
       ctx.putImageData(imgData, 0, 0);
       if(outlinePx > 0){
-        const sil = silhouetteCanvas(canvas, canvas.width, canvas.height, outline3dColor);
+        const sil = silhouetteCanvas(canvas, canvas.width, canvas.height, ol.color);
         const outCanvas = document.createElement('canvas');
         outCanvas.width = canvas.width; outCanvas.height = canvas.height;
         const octx = outCanvas.getContext('2d');
@@ -5080,11 +5086,12 @@
   function pieceVecSprite(type, colorKey){
     const fill = (getComputedStyle(document.documentElement)
       .getPropertyValue('--accent-' + CSSCOLOR[colorKey]) || '').trim() || DEFAULT_ACCENT[colorKey];
-    // the shared outline control drives the contour here too
-    const stroke = outline3dColor;
+    // this colour's own outline drives the contour here too
+    const ol = outlineForColor(colorKey);
+    const stroke = ol.color;
     // slider 0..8 maps straight onto the SVG pen; 0 stays 0 so the outline
     // can actually be switched off, same as it can for the 3D models
-    const sw = (outline3dWidth / 8) * 0.05;
+    const sw = (ol.px / 8) * 0.05;
     const key = type + '|' + fill + '|' + stroke + '|' + sw.toFixed(4);
     if(pieceVecCache[key]) return pieceVecCache[key];
     let url = '';
@@ -5105,7 +5112,8 @@
     // tilted 3D board it may stand above it. Both shapes can be needed in one
     // session, so the fit is part of the cache key.
     const squareFit = !view3D;
-    const key = type + '|' + hex + '|v' + variant + '|o' + outline3dColor + ':' + outline3dWidth + '|c' + pieceDetailContrast + (squareFit ? '|sq' : '|tall');
+    const ol = outlineForColor(colorKey);   // this colour's own outline
+    const key = type + '|' + hex + '|v' + variant + '|o' + ol.color + ':' + ol.px + '|c' + pieceDetailContrast + (squareFit ? '|sq' : '|tall');
     if(piece3dCache[key]) return piece3dCache[key];
     let url = '';
     try{
@@ -5113,7 +5121,7 @@
         const c = document.createElement('canvas');
         c.width = w; c.height = h;
         return c;
-      }, variant, { color: outline3dColor, px: outline3dWidth }, squareFit, pieceDetailContrast);
+      }, variant, { color: ol.color, px: ol.px }, squareFit, pieceDetailContrast);
       url = canvas.toDataURL('image/png');
     }catch(e){ return ''; }   // any failure falls back to the glyph rendering
     piece3dCache[key] = url;
@@ -5319,13 +5327,12 @@
       // glyph strokes are hairline-scale, so the shared slider is mapped down
       // to the range those controls use
       const px = Math.round((outline3dWidth / 8) * 3 * 10) / 10;
-      outlineSyncingFromShared = true;
-      try{
-        for(const ck of ['w','b','y','g']){
-          applyOutlineWidth(ck, px, save);
-          applyOutlineColor(ck, outline3dColor, save);
-        }
-      } finally { outlineSyncingFromShared = false; }
+      // the shared control is a "set all four" shortcut: it writes each
+      // colour's own value, which the per-colour sliders can then override
+      for(const ck of ['w','b','y','g']){
+        applyOutlineWidth(ck, px, save);
+        applyOutlineColor(ck, outline3dColor, save);
+      }
     }
     if(colorEl) colorEl.addEventListener('input', e=>{
       outline3dColor = e.target.value;
