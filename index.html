@@ -5112,7 +5112,9 @@
   const TILT_SCALE_AT_MIN = 1.22, TILT_SCALE_AT_MAX = 0.82;
   // Must stay equal to --piece-seat in the 3D CSS block: both describe the
   // same offset, one for resting pieces and one for animating ones.
-  const PIECE_SEAT_PCT = 0;
+  // 0 = untouched original look: a piece stands on the near edge of its
+  // square and towers over the ranks behind it.
+  let PIECE_SEAT_PCT = 0;
   function pieceTiltScale(){
     const t = Math.max(TILT_MIN, Math.min(TILT_MAX, boardTilt3D));
     const frac = (t - TILT_MIN) / (TILT_MAX - TILT_MIN);
@@ -5206,6 +5208,24 @@
     boardEl.style.setProperty('--piece-seat', (isBoardCurrentlyFlipped() ? -PIECE_SEAT_PCT : PIECE_SEAT_PCT) + '%');
     boardEl.style.setProperty('--piece-tilt-scale', String(pieceTiltScale()));
   }
+
+  // Live tuning hook for how high 3D pieces sit on their squares. Exactly how
+  // far a standing piece overhangs the ranks behind it depends on the tilt,
+  // the sprite pack and the screen, so it can't be worked out on paper —
+  // it has to be seen. In the browser console:
+  //     setPieceSeat(10)   // try 5, 10, 15... ; negative lifts instead
+  //     setPieceSeat(0)    // back to the original look
+  // Applies instantly to resting pieces AND to move animations. Once a value
+  // looks right, it belongs in three places: --piece-seat in #board.board3d,
+  // the same in #board.board3d.flip180 (negated), and PIECE_SEAT_PCT above.
+  window.setPieceSeat = function(pct){
+    const v = Number(pct);
+    if(!isFinite(v)) return PIECE_SEAT_PCT;
+    PIECE_SEAT_PCT = v;
+    syncBoardTiltVars();
+    try{ render(); }catch(e){}
+    return PIECE_SEAT_PCT;
+  };
 
   function applyBoardTilt(deg, save){
     boardTilt3D = Math.max(TILT_MIN, Math.min(TILT_MAX, deg));
