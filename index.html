@@ -2740,6 +2740,8 @@
   // throw and halt the entire script for anyone with a saved color, which is
   // exactly the bug this fixes.
   let onlineRoomId = null, onlineSide = null, onlineOpponent = null, onlineMoveSeq = 0;
+  // how many undos this table has agreed to; every client rewinds to match
+  let onlineUndoSeq = 0;
   // custom per-color display names (e.g. renaming "Серые" to something a
   // player picks) — declared this early for the same reason as onlineRoomId
   // above: restoring a saved custom name at page load runs before the rest
@@ -7902,6 +7904,21 @@
   function applyRemoteState(room){
     document.getElementById('skip-turn-info-modal').classList.remove('show');
     refreshLastRoomTimestamp();
+    // Keep the undo stack in step with the room BEFORE overwriting the state.
+    // Only the player who made a move used to record it, so everyone else's
+    // history stayed empty and undo could never step back more than once.
+    // Now each client records every move it receives and rewinds on every
+    // undo, so all four stacks stay identical and undo can walk all the way
+    // back to the opening position.
+    const remoteUndoSeq = room.undoSeq || 0;
+    if(remoteUndoSeq > onlineUndoSeq){
+      // somebody's undo was agreed: drop the snapshot it rewound past
+      for(let i = onlineUndoSeq; i < remoteUndoSeq; i++) history.pop();
+    } else if(JSON.stringify(room.board) !== JSON.stringify(board)){
+      // a real move landed — remember where we were so it can be taken back
+      history.push(snapshotState());
+    }
+    onlineUndoSeq = remoteUndoSeq;
     board = room.board;
     turnIndex = room.turnIndex;
     turn = TURN_ORDER[turnIndex];
@@ -8002,7 +8019,8 @@
       teamVoiceOnly: teamVoiceOnly,
       // carried through so a move made while a vote is open doesn't erase it
       teamVoiceReq: teamVoiceReq || null,
-      voiceInvite: voiceInvite || null
+      voiceInvite: voiceInvite || null,
+      undoSeq: onlineUndoSeq
     };
     return await storeSet('room:' + onlineRoomId, JSON.stringify(payload), true);
   }
@@ -12880,7 +12898,9 @@
   let undoAgreed = new Set();
   function openUndoModal(){
     if(onlineRoomId){
-      if(!lastMove){
+      // history, not lastMove: after the first undo lastMove may already be
+      // null while there are still earlier moves to take back
+      if(history.length === 0){
         appendChatMessage(t('systemLabel'), t('nothingToUndo'), true);
         return;
       }
@@ -12924,7 +12944,10 @@
     render();
     updateStatus();
     renderTimers();
-    if(onlineRoomId) pushRoomState(null);
+    if(onlineRoomId){
+      onlineUndoSeq++;      // tells the other clients to rewind one step too
+      pushRoomState(null);
+    }
   }
   document.getElementById('undo-confirm').addEventListener('click', ()=>{
     if(onlineRoomId){
@@ -12958,7 +12981,11 @@
     const allAgreed = req.agreed && seats.every(s => req.agreed[s]);
     if(allAgreed){
       document.getElementById('undo-modal').classList.remove('show');
-      if(lastMove && fbDb && onlineSide === onlineSeatForColor(lastMove.color)){
+      // Whoever asked carries it out and pushes the result; everyone else
+      // rewinds from undoSeq in applyRemoteState. It used to be the player
+      // who made the last move, which meant the undo depended on THAT
+      // client's history — and only they had one.
+      if(fbDb && onlineSide === req.requestedBy){
         performLocalUndo();
         fbDb.ref(undoPath()).remove();
       }
