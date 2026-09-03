@@ -4783,7 +4783,10 @@
     const gc = parseFloat(localStorage.getItem('chess2-piece-global-contrast'));
     if(isFinite(gc)) pieceGlobalContrast = Math.max(0, Math.min(10, gc));
   }catch(e){}
-  let piece3dCache = {};
+  // var, not let: invalidatePiece3D() and the sprite builders can be
+  // reached from the settings-restore pass that runs long before this
+  // line, and a let would still be in its temporal dead zone there.
+  var piece3dCache = {};
   // Which 3D model set to draw: style 12 uses the second, glossier variant.
   // Style 11/12 pick the models explicitly; the 3D board view also uses them
   // (variant 1) so that switching the board to 3D still gets solid pieces.
@@ -4807,7 +4810,10 @@
   // responds to the piece-colour and outline controls exactly like the
   // procedural 3D models do, instead of being stuck on 4 fixed baked-in
   // colours with no outline at all.
-  let piecePackImgCache = {};
+  // var, not let: invalidatePiece3D() and the sprite builders can be
+  // reached from the settings-restore pass that runs long before this
+  // line, and a let would still be in its temporal dead zone there.
+  var piecePackImgCache = {};
   function piecePackTemplateImg(mat, type){
     if(!piecePackImgCache[mat]) piecePackImgCache[mat] = {};
     if(!piecePackImgCache[mat][type]){
@@ -4826,7 +4832,10 @@
   // used to build the pack pieces' outline ring below.
   // Luminance range of a whole material's artwork, measured once and reused
   // for every piece in that set so they all share one shading curve.
-  let packLumRangeCache = {};
+  // var, not let: invalidatePiece3D() and the sprite builders can be
+  // reached from the settings-restore pass that runs long before this
+  // line, and a let would still be in its temporal dead zone there.
+  var packLumRangeCache = {};
   function packLumRange(mat){
     if(packLumRangeCache[mat]) return packLumRangeCache[mat];
     let min = 1, max = 0, seen = 0;
@@ -4864,7 +4873,10 @@
     cx.fillRect(0, 0, w, h);
     return c;
   }
-  let piecePackTintCache = {};
+  // var, not let: invalidatePiece3D() and the sprite builders can be
+  // reached from the settings-restore pass that runs long before this
+  // line, and a let would still be in its temporal dead zone there.
+  var piecePackTintCache = {};
   // Chess sets are normally proportioned so the queen and king stand
   // noticeably taller than the officers beside them. This pack's own
   // artwork has them only slightly taller (king/queen ≈88px vs the
@@ -5125,7 +5137,10 @@
     piecePackTintCache[key] = url;
     return url;
   }
-  let pieceVecCache = {};
+  // var, not let: invalidatePiece3D() and the sprite builders can be
+  // reached from the settings-restore pass that runs long before this
+  // line, and a let would still be in its temporal dead zone there.
+  var pieceVecCache = {};
   function pieceVecSprite(type, colorKey){
     const fill = (getComputedStyle(document.documentElement)
       .getPropertyValue('--accent-' + CSSCOLOR[colorKey]) || '').trim() || DEFAULT_ACCENT[colorKey];
@@ -5174,13 +5189,23 @@
   // pointer move, so redrawing 6 meshes per event would stutter. Clear and
   // rebuild once the user settles instead.
   let piece3dRefreshTimer = null;
+  // Called from the settings handlers — including the pass that restores saved
+  // colours and outlines at startup, which runs BEFORE the drawing code below
+  // is set up. Everything it touches (the caches, view3D, PACK_STYLES) is
+  // declared further down, so the whole body is guarded: during that early
+  // pass it simply does nothing, and the first real render draws the restored
+  // settings anyway. Without this the restore threw and took the rest of the
+  // script down with it — the board never appeared, but only for players who
+  // had actually customised something.
   function invalidatePiece3D(){
-    piece3dCache = {};
-    pieceVecCache = {};
-    piecePackTintCache = {};
-    if(!usePiece3DModels() && !usePieceVector() && !usePiecePack()) return;
-    clearTimeout(piece3dRefreshTimer);
-    piece3dRefreshTimer = setTimeout(()=>{ try{ render(); }catch(e){} }, 160);
+    try{
+      piece3dCache = {};
+      pieceVecCache = {};
+      piecePackTintCache = {};
+      if(!usePiece3DModels() && !usePieceVector() && !usePiecePack()) return;
+      clearTimeout(piece3dRefreshTimer);
+      piece3dRefreshTimer = setTimeout(()=>{ try{ render(); }catch(e){} }, 160);
+    }catch(e){ /* too early in startup — nothing cached yet, nothing to drop */ }
   }
 
   // ---- 2D / 3D board view ----
