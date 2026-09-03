@@ -577,6 +577,16 @@
   #board.board3d{
     --board-tilt:45deg;
     --piece-stand:calc(-1 * var(--board-tilt));
+    /* How far a standing piece is pulled back down onto its own square.
+       Needed because the board is foreshortened by rotateX while the piece
+       standing on it is not: a sprite ~1.2 squares tall, pinned to the
+       square's near edge, projects over ~1.7 on-screen ranks, so every piece
+       read as standing one rank further back. Applied along the piece's own
+       upright axis, so it inverts with the board exactly like --piece-stand.
+       Percentages are of the 260% sprite box, so one square = ~38.5%.
+       THIS IS THE ONE NUMBER TO TUNE: raise it to seat pieces lower, lower
+       it (or negate it) if they sit too deep. */
+    --piece-seat:21%;
     transform:rotateX(var(--board-tilt));
     transform-style:preserve-3d;
     /* preserve-3d is cancelled by any clipping/grouping property, so the 2D
@@ -593,7 +603,7 @@
   #board.board3d.flip180{ transform:rotateX(var(--board-tilt)) rotate(180deg); }
   /* When the board is flipped 180° about Z, its local X axis is inverted, so
      the counter-rotation that stands pieces up has to invert with it. */
-  #board.board3d.flip180{ --piece-stand:var(--board-tilt); }
+  #board.board3d.flip180{ --piece-stand:var(--board-tilt); --piece-seat:-21%; }
   #board.board3d .sq{ transform-style:preserve-3d; }
   /* Lacquered finish on the squares: a soft diagonal gloss plus a warm inner
      edge, so the board reads as polished rather than flat colour. Painted as
@@ -615,14 +625,14 @@
     box-shadow:inset 0 0 0 1px rgba(255,226,160,.06);
   }
   #board.board3d .piece{
-    transform:rotateX(var(--piece-stand)) scale(var(--piece-tilt-scale, 1)) scale(var(--piece-extra-scale, 1));
+    transform:rotateX(var(--piece-stand)) translateY(var(--piece-seat, 0%)) scale(var(--piece-tilt-scale, 1)) scale(var(--piece-extra-scale, 1));
     transform-origin:50% 100%;
     filter:
       drop-shadow(0 0 1px rgba(0,0,0,.95))
       drop-shadow(0 1px 1px rgba(0,0,0,.55))
       drop-shadow(0 10px 7px rgba(0,0,0,.45)) contrast(var(--piece-global-contrast,1));
   }
-  #board.board3d .piece.face-far{ transform:rotateX(var(--piece-stand)) scale(var(--piece-tilt-scale, 1)) scale(var(--piece-extra-scale, 1)) rotate(180deg); }
+  #board.board3d .piece.face-far{ transform:rotateX(var(--piece-stand)) translateY(var(--piece-seat, 0%)) scale(var(--piece-tilt-scale, 1)) scale(var(--piece-extra-scale, 1)) rotate(180deg); }
   /* Real 3D models: the sprite is an image standing on the square, so it is
      positioned absolutely and allowed to rise well above its own square —
      a king overlaps the ranks behind it exactly like a physical piece.
@@ -648,15 +658,15 @@
   }
   /* A model that has been turned to face the other player is mirrored, not
      flipped upside down like a flat glyph would be. */
-  #board.board3d .piece.piece3d.face-far, #board.board3d .piece.piece-vec.face-far{ transform:rotateX(var(--piece-stand)) scale(var(--piece-tilt-scale, 1)) scale(var(--piece-extra-scale, 1)) scaleX(-1); }
+  #board.board3d .piece.piece3d.face-far, #board.board3d .piece.piece-vec.face-far{ transform:rotateX(var(--piece-stand)) translateY(var(--piece-seat, 0%)) scale(var(--piece-tilt-scale, 1)) scale(var(--piece-extra-scale, 1)) scaleX(-1); }
   /* Cancelling the board flip in 3D. Flat glyphs turn a full 180°, exactly
      as before. Models keep the mirror here: in 3D their transform-origin is
      the square's bottom edge (they stand on it), and a 180° turn about that
      point would swing the piece below its own square. The 2D rule above is
      where the upside-down sprites actually came from. */
-  #board.board3d .piece.face-counter{ transform:rotateX(var(--piece-stand)) scale(var(--piece-tilt-scale, 1)) scale(var(--piece-extra-scale, 1)) rotate(180deg); }
+  #board.board3d .piece.face-counter{ transform:rotateX(var(--piece-stand)) translateY(var(--piece-seat, 0%)) scale(var(--piece-tilt-scale, 1)) scale(var(--piece-extra-scale, 1)) rotate(180deg); }
   #board.board3d .piece.piece3d.face-counter,
-  #board.board3d .piece.piece-vec.face-counter{ transform:rotateX(var(--piece-stand)) scale(var(--piece-tilt-scale, 1)) scale(var(--piece-extra-scale, 1)) scaleX(-1); }
+  #board.board3d .piece.piece-vec.face-counter{ transform:rotateX(var(--piece-stand)) translateY(var(--piece-seat, 0%)) scale(var(--piece-tilt-scale, 1)) scale(var(--piece-extra-scale, 1)) scaleX(-1); }
   /* Models carry their own contour, so they need only a tight contact
      shadow — the wide soft glow used for glyphs blurs their edges. */
   #board.board3d .piece.piece3d, #board.board3d .piece.piece-vec{
@@ -715,15 +725,15 @@
      These 3D variants re-apply it in every keyframe. */
   #board.board3d .piece-kick-impact{ animation-name:pieceKickImpact3d; }
   @keyframes pieceKickImpact3d{
-    0%{ transform:rotateX(var(--piece-stand)) scale(1) rotate(0deg); }
-    35%{ transform:rotateX(var(--piece-stand)) scale(1.28) rotate(-10deg); }
-    65%{ transform:rotateX(var(--piece-stand)) scale(0.92) rotate(5deg); }
-    100%{ transform:rotateX(var(--piece-stand)) scale(1) rotate(0deg); }
+    0%{ transform:rotateX(var(--piece-stand)) translateY(var(--piece-seat, 0%)) scale(1) rotate(0deg); }
+    35%{ transform:rotateX(var(--piece-stand)) translateY(var(--piece-seat, 0%)) scale(1.28) rotate(-10deg); }
+    65%{ transform:rotateX(var(--piece-stand)) translateY(var(--piece-seat, 0%)) scale(0.92) rotate(5deg); }
+    100%{ transform:rotateX(var(--piece-stand)) translateY(var(--piece-seat, 0%)) scale(1) rotate(0deg); }
   }
   #board.board3d .captured-piece-ghost{ animation-name:pieceFallOver3d; transform-origin:50% 100%; }
   @keyframes pieceFallOver3d{
-    0%{ transform:translate(0,0) rotateX(var(--piece-stand)) rotate(0deg) scale(1); opacity:1; }
-    100%{ transform:translate(var(--fall-x,26px), 46px) rotateX(var(--piece-stand)) rotate(var(--fall-rot,110deg)) scale(.65); opacity:0; }
+    0%{ transform:translate(0,0) rotateX(var(--piece-stand)) translateY(var(--piece-seat, 0%)) rotate(0deg) scale(1); opacity:1; }
+    100%{ transform:translate(var(--fall-x,26px), 46px) rotateX(var(--piece-stand)) translateY(var(--piece-seat, 0%)) rotate(var(--fall-rot,110deg)) scale(.65); opacity:0; }
   }
   /* 3D model sprites. On a flat board the piece stays inside its own square;
      in 3D view it is bottom-anchored and allowed to stand well above the
@@ -5112,6 +5122,9 @@
   // conservative so the reversal is visible without pieces swallowing the
   // ranks behind them.
   const TILT_SCALE_AT_MIN = 1.22, TILT_SCALE_AT_MAX = 0.82;
+  // Must stay equal to --piece-seat in the 3D CSS block: both describe the
+  // same offset, one for resting pieces and one for animating ones.
+  const PIECE_SEAT_PCT = 21;
   function pieceTiltScale(){
     const t = Math.max(TILT_MIN, Math.min(TILT_MAX, boardTilt3D));
     const frac = (t - TILT_MIN) / (TILT_MAX - TILT_MIN);
@@ -5134,6 +5147,7 @@
       // inverts with it — same rule as the --piece-stand CSS variable.
       const stand = isBoardCurrentlyFlipped() ? boardTilt3D : -boardTilt3D;
       parts.push('rotateX(' + stand + 'deg)');
+      parts.push('translateY(' + (isBoardCurrentlyFlipped() ? -PIECE_SEAT_PCT : PIECE_SEAT_PCT) + '%)');
       parts.push('scale(' + pieceTiltScale() + ')');
       // West and the image packs stand wider than Classic in the same box
       // (see the matching CSS rule) — matched here so a piece doesn't
@@ -5199,6 +5213,9 @@
     const stand = isBoardCurrentlyFlipped() ? boardTilt3D : -boardTilt3D;
     boardEl.style.setProperty('--board-tilt', boardTilt3D + 'deg');
     boardEl.style.setProperty('--piece-stand', stand + 'deg');
+    // pulled back down onto the square along the piece's own upright axis;
+    // inverts with the board exactly like the stand-up angle above
+    boardEl.style.setProperty('--piece-seat', (isBoardCurrentlyFlipped() ? -PIECE_SEAT_PCT : PIECE_SEAT_PCT) + '%');
     boardEl.style.setProperty('--piece-tilt-scale', String(pieceTiltScale()));
   }
 
