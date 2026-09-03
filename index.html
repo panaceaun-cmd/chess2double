@@ -5684,9 +5684,11 @@
   function t(key){
     const cur = LOC[currentLang];
     if(cur && cur[key] !== undefined) return cur[key];
+    if(LOC.en && LOC.en[key] !== undefined && currentLang !== 'ru') return LOC.en[key];
     if(LOC.ru[key] !== undefined) return LOC.ru[key];
     return key;
   }
+
   function colorLabel(c){
     if(customColorNames[c]) return customColorNames[c];
     const cur = LOC[currentLang] || LOC.ru;
@@ -13265,7 +13267,7 @@
   // line tells us instantly whether the browser is running the current file
   // or a stale cached one — the difference between a real bug and a stale
   // deploy, which is otherwise impossible to tell apart from a screenshot.
-  const BUILD_VERSION = '2026-09-01 · 21';
+  const BUILD_VERSION = '2026-09-03 · 22';
   (function stampBuild(){
     const el = document.getElementById('build-stamp');
     if(el) el.textContent = 'CHESS 2 DOUBLE · build ' + BUILD_VERSION;
