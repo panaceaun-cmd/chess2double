@@ -2783,8 +2783,9 @@
     const ctrl = controllerColor(color);
     const takeoverSuffix = (ctrl !== color) ? (' · ' + t('controlledBySuffix') + ' ' + colorLabel(ctrl)) : '';
     if(onlineRoomId){
-      const side = OWNER[color];
-      const nick = (side === onlineSide) ? myNick : onlineOpponent;
+      // seat, not team — see nicknameForColor() for why OWNER[] is wrong here
+      const side = onlineSeatForColor(color);
+      const nick = (side === onlineSide) ? myNick : onlinePlayers[side];
       if(nick) return label + ' (' + nick + ')' + takeoverSuffix;
     } else {
       const n = MODE_PLAYER_NUM[mode][ctrl];
@@ -7744,7 +7745,13 @@
       // seat is "mine" now, not whatever onlineSide happened to be before
       if(onlinePlayers[onlineSide] !== myNick){
         const mySeatNow = Object.keys(onlinePlayers).find(s => onlinePlayers[s] === myNick);
-        if(mySeatNow) onlineSide = mySeatNow;
+        // my seat moved without me acting — re-point the voice channel and
+        // the teammate row too, exactly as the player who accepted does
+        if(mySeatNow && mySeatNow !== onlineSide){
+          onlineSide = mySeatNow;
+          startGroupVoiceInviteListener();
+          if(groupVoiceActive){ stopGroupVoice(); }
+        }
       }
       onlineOpponent = Object.keys(onlinePlayers).filter(s => s !== onlineSide && onlinePlayers[s]).map(s => onlinePlayers[s]).join(', ');
       const nowComplete = Object.keys(onlinePlayers).length >= (onlineMaxPlayers||2) && Object.values(onlinePlayers).every(v => v);
@@ -7876,7 +7883,11 @@
     if(!STORAGE_OK || !myNick) return;
     let iWon;
     if(onlineRoomId){
-      iWon = winningSide === onlineSide;
+      // winningSide is a TEAM ("p1"/"p2"); onlineSide is a SEAT (p1..p4).
+      // Comparing them directly marked seats p3/p4 as losers even when their
+      // own team won, so work out my team from the colour I actually play.
+      const myColor = TURN_ORDER.find(c => onlineSeatForColor(c) === onlineSide);
+      iWon = myColor ? (OWNER[myColor] === winningSide) : false;
     } else {
       // Local/offline game: attribute "your" result to whichever side Seat 1 controls.
       iWon = TURN_ORDER.some(c => OWNER[c] === winningSide && MODE_PLAYER_NUM[mode][c] === 1);
@@ -8104,24 +8115,31 @@
 
   async function performSwapSeats(otherSeat){
     if(!onlineRoomId || !fbDb || !otherSeat || otherSeat === onlineSide || !onlinePlayers[otherSeat]) return;
-    const raw = await storeGet('room:' + onlineRoomId, true);
-    if(!raw) return;
-    let room; try{ room = JSON.parse(raw); }catch(e){ return; }
     const mySeat = onlineSide;
-    const tmp = room.players[mySeat];
-    room.players[mySeat] = room.players[otherSeat];
-    room.players[otherSeat] = tmp;
-    room.moveSeq = (room.moveSeq||0) + 1;
-    await storeSet('room:' + onlineRoomId, JSON.stringify(room), true);
-    // this was the actual bug: without updating onlineMoveSeq to match what
-    // was just written, this player's own NEXT move would recompute the
-    // exact same moveSeq the swap just used — and every other client's
-    // "only apply if moveSeq is strictly newer" check would then silently
-    // drop that move as a stale duplicate, since it never increased.
+    let applied = null;
+    // Atomic read-modify-write. The old version did storeGet -> edit ->
+    // storeSet, so a move that landed in between was silently overwritten by
+    // the swap writing back the board it had read moments earlier. A
+    // transaction re-runs against whatever is actually current instead.
+    const ok = await storeTransaction('room:' + onlineRoomId, (current) => {
+      if(!current) return current;
+      let room;
+      try{ room = JSON.parse(current); }catch(e){ return current; }
+      if(!room.players || !room.players[mySeat] || !room.players[otherSeat]) return current;
+      const tmp = room.players[mySeat];
+      room.players[mySeat] = room.players[otherSeat];
+      room.players[otherSeat] = tmp;
+      room.moveSeq = (room.moveSeq || 0) + 1;
+      applied = room;
+      return JSON.stringify(room);
+    }, true);
+    if(!ok || !applied) return;
+    const room = applied;
+    // keep our own counter level with what was just committed, or this
+    // player's next move would reuse the same moveSeq and every other client
+    // would drop it as a stale duplicate
     onlineMoveSeq = room.moveSeq;
-    // also adopt whatever board/turn state was actually current in this
-    // same read, so the swap can never locally revert a move that landed
-    // in Firebase moments before it
+    // adopt the board that was actually current in the committed version
     board = room.board;
     turnIndex = room.turnIndex;
     turn = TURN_ORDER[turnIndex];
@@ -8130,16 +8148,23 @@
     if(room.timers) timers = room.timers;
     if(room.takenOverBy) takenOverBy = room.takenOverBy;
     if(room.eliminatedColors) eliminatedColors = new Set(room.eliminatedColors);
-    const otherNick = room.players[mySeat]; // after the swap above, this now holds who I swapped with
+    const otherNick = room.players[mySeat]; // after the swap, this is who I swapped with
     const announceMsg = myNick + ' ' + t('swappedColorsWithMsg') + ' ' + otherNick;
     appendChatMessage(t('systemLabel'), announceMsg, true);
     if(fbDb) fbDb.ref(rcPath()).push(JSON.stringify({sender: t('systemLabel'), text: announceMsg, from: mySeat, system: true, ts: Date.now()}));
-    onlineSide = otherSeat;
-    onlinePlayers = room.players;
+    adoptSeat(otherSeat, room.players);
+  }
+
+  // Everything that has to follow "my seat is now a different one" — used by
+  // both ends of a swap, so the player who accepted and the player who
+  // merely receives the update end up in exactly the same state.
+  function adoptSeat(newSeat, players){
+    onlineSide = newSeat;
+    if(players) onlinePlayers = players;
     onlineOpponent = Object.keys(onlinePlayers).filter(s => s !== onlineSide && onlinePlayers[s]).map(s => onlinePlayers[s]).join(', ');
     selected = null; legalMoves = [];
-    // my seat moved, so voice invites for me now arrive on a different node —
-    // and swapping sides can change who my partner is
+    // voice invites for me now arrive on a different pair node, and swapping
+    // sides can change who my partner is
     startGroupVoiceInviteListener();
     if(groupVoiceActive){ stopGroupVoice(); }
     updateTeamVoiceRow();
@@ -9942,8 +9967,13 @@
   function nicknameForColor(color){
     const ctrl = controllerColor(color);
     if(onlineRoomId){
-      const side = OWNER[color];
-      const nick = (side === onlineSide) ? myNick : onlineOpponent;
+      // onlineSeatForColor(), NOT OWNER[] — OWNER maps a colour to its TEAM
+      // ("p1"/"p2"), while seats run p1..p4. In 3p/4p those namespaces
+      // diverge, which is why every corner bar showed the wrong name: seats
+      // p3/p4 never matched OWNER, so they all fell through to the
+      // comma-joined list of every other player.
+      const side = onlineSeatForColor(ctrl);
+      const nick = (side === onlineSide) ? myNick : onlinePlayers[side];
       return nick || colorLabel(color);
     }
     const n = MODE_PLAYER_NUM[mode][ctrl];
