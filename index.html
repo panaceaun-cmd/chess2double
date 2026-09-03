@@ -1373,7 +1373,9 @@
     display:flex; align-items:center; justify-content:flex-end;
     gap:8px; margin-top:8px;
   }
-  #voice-chat-btn{ font-size:12px; padding:8px 12px; }
+  /* deliberately as big and as gold as the "Сказать" button next to it —
+     joining the table's voice chat is a primary action, not a footnote */
+  #voice-chat-btn{ font-size:15px; padding:12px 20px; font-weight:700; }
   .file-share-row{
     display:flex; align-items:center; justify-content:flex-end;
     gap:8px; margin-top:6px;
@@ -2043,7 +2045,7 @@
           <button type="submit" class="btn">Сказать</button>
         </form>
         <div class="voice-chat-row">
-          <button type="button" class="btn secondary" id="voice-chat-btn" style="display:none;">🔇 Говорить с игроками онлайн</button>
+          <button type="button" class="btn" id="voice-chat-btn" style="display:none; font-size:15px; padding:12px 20px; font-weight:700;">🔇 Говорить с игроками онлайн</button>
           <span id="voice-chat-status"></span>
           <span id="voice-chat-diag" style="display:block; font-size:10px; color:var(--ink-dim); opacity:.8; margin-top:2px;"></span>
         </div>
@@ -9485,45 +9487,89 @@
     if(statusEl) statusEl.textContent = t('voiceChatConnecting');
     const otherSeats = voicePeerSeats();
     otherSeats.forEach(seat => establishGroupVoicePeer(seat));
-    // let the people I'm actually connecting to know voice chat is open, in
-    // case they haven't joined yet — same ring/accept/decline prompt as a
-    // 2-player call. Invites are written per seat rather than to one shared
-    // node so that, with teammate-only voice on, each side's invitation
-    // reaches its own partners and never overwrites the other team's.
+    // ring the people I'm connecting to, so they get the same accept/decline
+    // prompt as a 2-player call instead of having to notice the button
+    // themselves. With teammate-only voice on, only my partners are rung.
+    sendVoiceCtl({kind:'invite', team: teamVoiceOnly && hasTeamPartners()}, otherSeats);
+  }
+
+  // ---- voice control channel ----
+  // Invites and the teammate-only vote both travel on the SAME pairwise
+  // path the audio mesh already uses (voice-signal/<room>/<pairKey>/<item>).
+  // That shape is the one the database rules actually grant — a node written
+  // straight under the room id, or a brand-new top-level "*-request" branch,
+  // is silently rejected as PERMISSION_DENIED, which is exactly why the
+  // group invite never reached anyone. One node per sender per pair, so two
+  // teams can never overwrite each other's messages.
+  const ALL_SEATS = ['p1', 'p2', 'p3', 'p4'];
+  let lastSentCtlTs = 0;
+  function voiceCtlPath(otherSeat, senderSeat){
+    return 'voice-signal/' + onlineRoomId + '/' + pairKeyFor(onlineSide, otherSeat) + '/ctl-' + senderSeat;
+  }
+  async function sendVoiceCtl(msg, seats){
+    if(!fbDb || !onlineRoomId || !onlineSide) return;
+    const targets = seats || ALL_SEATS.filter(s => s !== onlineSide && onlinePlayers[s]);
+    if(!targets.length) return;
+    // strictly increasing, so two messages in the same millisecond can't make
+    // the receiver's de-duplication drop the second one
+    const ts = Math.max(Date.now(), lastSentCtlTs + 1);
+    lastSentCtlTs = ts;
+    const body = Object.assign({from: myNick, seat: onlineSide, ts}, msg);
     try{
-      const payload = await encryptVoiceSignal(onlineRoomId, JSON.stringify({
-        from: myNick, ts: Date.now(), team: teamVoiceOnly && hasTeamPartners()
-      }));
-      otherSeats.forEach(seat => {
-        try{ fbDb.ref('voice-signal/' + onlineRoomId + '/group-invite/' + seat).set(payload); }catch(e){}
+      const payload = await encryptVoiceSignal(onlineRoomId, JSON.stringify(body));
+      targets.forEach(seat => {
+        try{ fbDb.ref(voiceCtlPath(seat, onlineSide)).set(payload); }catch(e){}
       });
     }catch(e){}
   }
 
-  let groupVoiceInviteRef = null;
+  let groupVoiceInviteRefs = [];
   let lastSeenGroupInviteTs = 0;
   let pendingGroupVoiceInvite = false;
+  let lastSeenCtlTs = {};
   function startGroupVoiceInviteListener(){
     stopGroupVoiceInviteListener();
-    if(!onlineRoomId || !fbDb || onlineMaxPlayers <= 2) return;
-    groupVoiceInviteRef = fbDb.ref('voice-signal/' + onlineRoomId + '/group-invite/' + onlineSide);
-    groupVoiceInviteRef.on('value', async (snap) => {
-      const raw = snap.val();
-      if(!raw || groupVoiceActive) return;
-      let data; try{ data = JSON.parse(await decryptVoiceSignal(onlineRoomId, raw)); }catch(e){ return; }
-      if(!data || data.from === myNick) return;
-      if(data.ts <= lastSeenGroupInviteTs) return; // already prompted (or declined) for this exact invite
-      lastSeenGroupInviteTs = data.ts;
-      pendingGroupVoiceInvite = true;
-      // make it clear whether this is the whole table or just my side
-      const titleEl = document.getElementById('incoming-call-title');
-      if(titleEl) titleEl.textContent = data.team ? t('teamVoiceInviteTitle') : t('incomingCallTitle');
-      showIncomingCallModal(data.from);
+    if(!onlineRoomId || !fbDb || !onlineSide || onlineMaxPlayers <= 2) return;
+    // one subscription per other seat — the pair key is seat-sorted, so both
+    // ends resolve to the same folder, and each seat only ever writes to its
+    // own "ctl-<seat>" child
+    ALL_SEATS.filter(s => s !== onlineSide).forEach(seat => {
+      const ref = fbDb.ref(voiceCtlPath(seat, seat));
+      groupVoiceInviteRefs.push(ref);
+      ref.on('value', snap => handleVoiceCtlSnap(seat, snap));
     });
   }
   function stopGroupVoiceInviteListener(){
-    if(groupVoiceInviteRef){ try{ groupVoiceInviteRef.off(); }catch(e){} groupVoiceInviteRef = null; }
+    groupVoiceInviteRefs.forEach(r => { try{ r.off(); }catch(e){} });
+    groupVoiceInviteRefs = [];
     pendingGroupVoiceInvite = false;
+    lastSeenCtlTs = {};
+  }
+  async function handleVoiceCtlSnap(fromSeat, snap){
+    const raw = snap.val();
+    if(!raw || !onlineRoomId) return;
+    let data;
+    try{ data = JSON.parse(await decryptVoiceSignal(onlineRoomId, raw)); }catch(e){ return; }
+    if(!data || !data.ts || data.seat === onlineSide) return;
+    if(data.ts <= (lastSeenCtlTs[fromSeat] || 0)) return; // already handled this one
+    lastSeenCtlTs[fromSeat] = data.ts;
+    switch(data.kind){
+      case 'invite': {
+        if(groupVoiceActive) return; // already in the channel
+        if(data.ts <= lastSeenGroupInviteTs) return;
+        lastSeenGroupInviteTs = data.ts;
+        pendingGroupVoiceInvite = true;
+        // make it clear whether this is the whole table or just my side
+        const titleEl = document.getElementById('incoming-call-title');
+        if(titleEl) titleEl.textContent = data.team ? t('teamVoiceInviteTitle') : t('incomingCallTitle');
+        showIncomingCallModal(data.from);
+        break;
+      }
+      case 'tv-req':   showTeamVoiceVote(data); break;
+      case 'tv-ack':   registerTeamVoiceAck(data); break;
+      case 'tv-apply': applyAgreedTeamVoice(data); break;
+      case 'tv-cancel': handleTeamVoiceCancel(data); break;
+    }
   }
 
   function establishGroupVoicePeer(otherSeat){
@@ -9572,7 +9618,7 @@
           if(groupVoiceFbRefs[otherSeat]) groupVoiceFbRefs[otherSeat].forEach(r => { try{ r.off(); }catch(e){} });
           delete groupVoiceFbRefs[otherSeat];
           if(fbDb && onlineRoomId){
-            try{ fbDb.ref('voice-signal/' + onlineRoomId + '/' + pairKeyFor(onlineSide, otherSeat)).remove(); }catch(e){}
+            clearPairMediaSignals(otherSeat);
           }
           return; // give up on just this one peer — the rest of the group is unaffected
         }
@@ -9666,7 +9712,7 @@
       if(groupVoiceReconnectTimers[seat]) clearTimeout(groupVoiceReconnectTimers[seat]);
       if(groupVoiceFbRefs[seat]) groupVoiceFbRefs[seat].forEach(r => { try{ r.off(); }catch(e){} });
       if(fbDb && onlineRoomId){
-        try{ fbDb.ref('voice-signal/' + onlineRoomId + '/' + pairKeyFor(onlineSide, seat)).remove(); }catch(e){}
+        clearPairMediaSignals(seat);
       }
     });
     groupVoicePeerConnections = {};
@@ -9674,118 +9720,143 @@
     groupVoiceReconnectTimers = {};
     groupVoiceDisconnectedSince = {};
     groupVoiceFbRefs = {};
-    // don't leave a stale "come and talk" invite behind for anyone
+    // withdraw my "come and talk" invite so nobody gets rung by a stale one
     if(fbDb && onlineRoomId && onlineSide){
-      Object.keys(onlinePlayers).forEach(seat => {
-        if(seat === onlineSide) return;
-        try{ fbDb.ref('voice-signal/' + onlineRoomId + '/group-invite/' + seat).remove(); }catch(e){}
+      ALL_SEATS.filter(s => s !== onlineSide).forEach(seat => {
+        try{ fbDb.ref(voiceCtlPath(seat, onlineSide)).remove(); }catch(e){}
       });
     }
   }
-
-  // ---- switching teammate-only voice on/off needs everyone's consent ----
-  // Same propose → everyone agrees → apply flow used for the game clock and
-  // the per-move limit, so no one can quietly cut the other side out of the
-  // conversation (or drag them into it) in the middle of a game.
-  let teamVoiceProposed = null;
-  let teamVoiceReqRef = null;
-  function teamVoiceReqPath(){ return 'teamvoice-request/' + onlineRoomId; }
-
-  async function proposeTeamVoice(wanted){
-    if(!fbDb || !onlineRoomId) return;
-    const agreed = {};
-    Object.keys(onlinePlayers).forEach(s => { if(onlinePlayers[s]) agreed[s] = false; });
-    agreed[onlineSide] = true;
-    teamVoiceProposed = wanted;
-    await fbDb.ref(teamVoiceReqPath()).set(JSON.stringify({requestedBy: onlineSide, on: wanted, agreed, ts: Date.now()}));
-  }
-  async function agreeToTeamVoice(){
-    if(!fbDb || !onlineRoomId) return;
-    const snap = await fbDb.ref(teamVoiceReqPath()).once('value');
-    const raw = snap.val();
-    if(!raw) return;
-    let req; try{ req = JSON.parse(raw); }catch(e){ return; }
-    if(!req.agreed) req.agreed = {};
-    req.agreed[onlineSide] = true;
-    await fbDb.ref(teamVoiceReqPath()).set(JSON.stringify(req));
-  }
-  function startTeamVoiceRequestListener(){
-    stopTeamVoiceRequestListener();
-    if(!onlineRoomId || !fbDb) return;
-    teamVoiceReqRef = fbDb.ref(teamVoiceReqPath());
-    teamVoiceReqRef.on('value', snap => {
-      const raw = snap.val();
-      if(!raw){
-        const m = document.getElementById('teamvoice-modal');
-        if(m) m.classList.remove('show');
-        teamVoiceProposed = null;
-        updateTeamVoiceRow();
-        return;
-      }
-      let req; try{ req = JSON.parse(raw); }catch(e){ return; }
-      handleTeamVoiceRequestChange(req);
+  // only the offer/answer/ICE children — the ctl-* nodes carry invites and
+  // the teammate-only vote, and must survive someone leaving the channel
+  function clearPairMediaSignals(otherSeat){
+    ['offer', 'answer', 'candidates-' + onlineSide, 'candidates-' + otherSeat].forEach(item => {
+      try{ fbDb.ref(groupVoicePairPath(otherSeat, item)).remove(); }catch(e){}
     });
   }
-  function stopTeamVoiceRequestListener(){
-    if(teamVoiceReqRef){ try{ teamVoiceReqRef.off(); }catch(e){} teamVoiceReqRef = null; }
+
+  // ---- switching teammate-only voice on/off needs everyone's consent ----
+  // Runs over the same pairwise ctl channel as the invite above, for the same
+  // permissions reason. Flow: proposer asks -> EVERY other player gets a modal
+  // and must press confirm -> once all acks are in, the proposer broadcasts
+  // the agreed value and everyone applies it. Nobody can quietly cut the
+  // other side out of the conversation, or drag them into it, mid-game.
+  let teamVoiceProposed = null;      // value being voted on (proposer + voters)
+  let teamVoicePendingReq = null;    // the request I still have to answer
+  let teamVoiceAcks = {};            // proposer only: seat -> true
+  let teamVoiceVoteTs = 0;           // ts of the proposal in flight
+
+  function teamVoiceVoterSeats(){
+    return ALL_SEATS.filter(s => s !== onlineSide && onlinePlayers[s]);
+  }
+  function proposeTeamVoice(wanted){
+    const voters = teamVoiceVoterSeats();
+    if(!voters.length){ setTeamVoiceOnly(wanted, false); return; }
+    teamVoiceProposed = wanted;
+    teamVoicePendingReq = null;
+    teamVoiceAcks = {};
+    teamVoiceVoteTs = Date.now();
+    sendVoiceCtl({kind:'tv-req', on: wanted, voteTs: teamVoiceVoteTs}, voters);
+    renderTeamVoiceVote(null); // shows the "waiting for the others" state
+  }
+  // I'm being asked — show the modal with a confirm button
+  function showTeamVoiceVote(data){
+    teamVoicePendingReq = data;
+    teamVoiceProposed = !!data.on;
+    renderTeamVoiceVote(data);
+  }
+  function confirmTeamVoiceVote(){
+    if(!teamVoicePendingReq) return;
+    const req = teamVoicePendingReq;
+    teamVoicePendingReq = null;
+    renderTeamVoiceVote(null); // waiting on everyone else — set before we
+    sendVoiceCtl({kind:'tv-ack', voteTs: req.voteTs, on: req.on}, [req.seat]); // send, so a fast reply isn't overwritten
+  }
+  // proposer side: collect the confirmations
+  function registerTeamVoiceAck(data){
+    if(!teamVoiceVoteTs || data.voteTs !== teamVoiceVoteTs) return;
+    teamVoiceAcks[data.seat] = true;
+    const voters = teamVoiceVoterSeats();
+    if(!voters.every(s => teamVoiceAcks[s])){ renderTeamVoiceVote(null); return; }
+    // everyone said yes — announce it and let each client apply it
+    const agreed = teamVoiceProposed;
+    sendVoiceCtl({kind:'tv-apply', on: agreed, voteTs: teamVoiceVoteTs}, voters);
+    closeTeamVoiceVote();
+    setTeamVoiceOnly(!!agreed, true);
+    // the proposer writes the agreed value into the room record, so anyone
+    // invited or reconnecting later inherits it automatically
+    pushRoomState(null);
+  }
+  function applyAgreedTeamVoice(data){
+    closeTeamVoiceVote();
+    setTeamVoiceOnly(!!data.on, true);
+  }
+  function cancelTeamVoiceVote(){
+    if(teamVoicePendingReq){
+      // I'm the one being asked — turning it down calls the whole vote off
+      sendVoiceCtl({kind:'tv-cancel', voteTs: teamVoicePendingReq.voteTs}, [teamVoicePendingReq.seat]);
+    } else if(teamVoiceVoteTs){
+      const voters = teamVoiceVoterSeats();
+      if(voters.length) sendVoiceCtl({kind:'tv-cancel', voteTs: teamVoiceVoteTs}, voters);
+    }
+    closeTeamVoiceVote();
+  }
+  function handleTeamVoiceCancel(data){
+    // a voter refused: as the proposer, pass that on so nobody is left
+    // staring at a modal for a vote that is already dead
+    if(teamVoiceVoteTs && data.voteTs === teamVoiceVoteTs){
+      const rest = teamVoiceVoterSeats().filter(s => s !== data.seat);
+      if(rest.length) sendVoiceCtl({kind:'tv-cancel', voteTs: teamVoiceVoteTs}, rest);
+    }
+    closeTeamVoiceVote();
+  }
+  function closeTeamVoiceVote(){
     teamVoiceProposed = null;
+    teamVoicePendingReq = null;
+    teamVoiceAcks = {};
+    teamVoiceVoteTs = 0;
     const m = document.getElementById('teamvoice-modal');
     if(m) m.classList.remove('show');
+    updateTeamVoiceRow();
   }
-  function handleTeamVoiceRequestChange(req){
+  // data === the request I must answer, or null when I'm just waiting
+  function renderTeamVoiceVote(data){
     const modal = document.getElementById('teamvoice-modal');
-    const seats = Object.keys(onlinePlayers).filter(s => onlinePlayers[s]);
-    if(req.agreed && seats.length > 0 && seats.every(s => req.agreed[s])){
-      if(modal) modal.classList.remove('show');
-      teamVoiceProposed = null;
-      setTeamVoiceOnly(!!req.on, true);
-      // the player who asked cleans up and writes the agreed value into the
-      // room record, so anyone joining later inherits it automatically
-      if(onlineSide === req.requestedBy){
-        if(fbDb) fbDb.ref(teamVoiceReqPath()).remove();
-        pushRoomState(null);
-      }
-      return;
-    }
-    teamVoiceProposed = !!req.on;
     const wrap = document.getElementById('teamvoice-vote-players');
     const agreeBtn = document.getElementById('teamvoice-agree');
-    const who = onlinePlayers[req.requestedBy] || t('playerWord');
-    const askMsg = (req.on ? t('teamVoiceOnRequestMsg') : t('teamVoiceOffRequestMsg')).replace('{n}', who);
-    if(req.agreed && req.agreed[onlineSide]){
-      if(wrap) wrap.innerHTML = '<p>' + escapeHtml(t('undoWaitingMsg')) + '</p>';
-      if(agreeBtn) agreeBtn.style.display = 'none';
-    } else {
+    if(data){
+      const who = onlinePlayers[data.seat] || data.from || t('playerWord');
+      const askMsg = (data.on ? t('teamVoiceOnRequestMsg') : t('teamVoiceOffRequestMsg')).replace('{n}', who);
       if(wrap) wrap.innerHTML = '<p>' + escapeHtml(askMsg) + '</p>';
       if(agreeBtn){
         agreeBtn.style.display = '';
-        agreeBtn.onclick = () => agreeToTeamVoice();
+        agreeBtn.onclick = () => confirmTeamVoiceVote();
       }
+    } else {
+      if(wrap) wrap.innerHTML = '<p>' + escapeHtml(t('undoWaitingMsg')) + '</p>';
+      if(agreeBtn) agreeBtn.style.display = 'none';
     }
     if(modal) modal.classList.add('show');
   }
+  // kept as no-ops so the room lifecycle calls stay in one place
+  function startTeamVoiceRequestListener(){ closeTeamVoiceVote(); }
+  function stopTeamVoiceRequestListener(){ closeTeamVoiceVote(); }
 
   (function initTeamVoiceControls(){
     const box = document.getElementById('team-voice-toggle');
     if(box) box.addEventListener('change', (e) => {
       const wanted = e.target.checked;
       // offline, or the only one at the table — nobody to ask
-      if(!onlineRoomId || !fbDb || otherSeatsInRoom().length === 0){
+      if(!onlineRoomId || !fbDb || teamVoiceVoterSeats().length === 0){
         setTeamVoiceOnly(wanted, false);
         return;
       }
-      // put the box back until everyone has actually agreed
+      // put the box back until everyone has actually confirmed
       e.target.checked = !!teamVoiceOnly;
       proposeTeamVoice(wanted);
     });
     const cancel = document.getElementById('teamvoice-cancel');
-    if(cancel) cancel.addEventListener('click', async () => {
-      const m = document.getElementById('teamvoice-modal');
-      if(m) m.classList.remove('show');
-      teamVoiceProposed = null;
-      updateTeamVoiceRow();
-      if(onlineRoomId && fbDb){ try{ await fbDb.ref(teamVoiceReqPath()).remove(); }catch(e){} }
-    });
+    if(cancel) cancel.addEventListener('click', () => cancelTeamVoiceVote());
   })();
   // ================= END GROUP VOICE =================
 
