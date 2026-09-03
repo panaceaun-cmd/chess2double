@@ -7463,6 +7463,7 @@
       try{ localStorage.setItem('chess2-team-voice', teamVoiceOnly ? '1' : '0'); }catch(e){}
     }
     teamVoiceReq = room.teamVoiceReq || null;
+    voiceInvite = room.voiceInvite || null;
     renderModeMenu();
     populateChatSenders();
 
@@ -7819,6 +7820,8 @@
     }
     // the teammate-voice vote travels with the room, so it reaches everyone
     handleTeamVoiceReqState(room.teamVoiceReq || null);
+    // ...and so does the "come and talk" ring
+    handleVoiceInviteState(room.voiceInvite || null);
     applyRoomStyleFields(room);
     if(room.players){
       const wasIncomplete = Object.values(onlinePlayers).some(v => !v) || Object.keys(onlinePlayers).length < (room.maxPlayers||2);
@@ -7889,7 +7892,8 @@
       // reconnects and reaches anyone invited in later
       teamVoiceOnly: teamVoiceOnly,
       // carried through so a move made while a vote is open doesn't erase it
-      teamVoiceReq: teamVoiceReq || null
+      teamVoiceReq: teamVoiceReq || null,
+      voiceInvite: voiceInvite || null
     };
     return await storeSet('room:' + onlineRoomId, JSON.stringify(payload), true);
   }
@@ -9416,6 +9420,7 @@
   }
 
   function stopVoiceChatInternal(){
+    clearVoiceInvite();   // don't leave a stale ring in the room record
     voiceActive = false;
     updateVoiceChatButton();
     updatePttHoldButtonVisibility();
@@ -9448,6 +9453,9 @@
       stopVoiceChatInternal();
     } else {
       setCallState({state:'ringing', caller:onlineSide});
+      // also ring through the room record: call-state alone was not reaching
+      // the other player, and the room provably does
+      broadcastVoiceInvite(null, false);
       voiceCallState = 'ringing';
       updateVoiceChatButton();
       const statusEl = document.getElementById('voice-chat-status');
@@ -9600,7 +9608,7 @@
     // ring the people I'm connecting to, so they get the same accept/decline
     // prompt as a 2-player call instead of having to notice the button
     // themselves. With teammate-only voice on, only my partners are rung.
-    sendVoiceCtl({kind:'invite', team: teamVoiceOnly && hasTeamPartners()}, otherSeats);
+    broadcastVoiceInvite(otherSeats, teamVoiceOnly && hasTeamPartners());
   }
 
   // ---- voice control channel ----
@@ -9612,6 +9620,72 @@
   // group invite never reached anyone. One node per sender per pair, so two
   // teams can never overwrite each other's messages.
   const ALL_SEATS = ['p1', 'p2', 'p3', 'p4'];
+
+  // ---- ringing everyone: carried by the ROOM RECORD ----
+  // Same reasoning as the teammate-voice vote. A dedicated signalling node
+  // only arrives if the database rules happen to grant that exact path, and
+  // they don't — which is why nobody was ever rung. Every client already
+  // syncs the room (that is how the board moves), so an invite written there
+  // reaches all of them, in 2-, 3- and 4-player games alike.
+  //
+  //   room.voiceInvite = { by, ts, team, targets:[seats] | null }
+  //
+  // targets is null for "everyone at the table" and a seat list when
+  // teammate-only voice limits the call to one side.
+  function broadcastVoiceInvite(targets, team){
+    if(!onlineRoomId || !fbDb || !onlineSide) return;
+    storeTransaction('room:' + onlineRoomId, (current) => {
+      if(!current) return current;
+      let room;
+      try{ room = JSON.parse(current); }catch(e){ return current; }
+      room.voiceInvite = {
+        by: onlineSide, ts: Date.now(), team: !!team,
+        targets: (targets && targets.length) ? targets : null
+      };
+      room.moveSeq = (room.moveSeq || 0) + 1;
+      return JSON.stringify(room);
+    }, true);
+  }
+  function clearVoiceInvite(){
+    if(!onlineRoomId || !fbDb || !onlineSide) return;
+    storeTransaction('room:' + onlineRoomId, (current) => {
+      if(!current) return current;
+      let room;
+      try{ room = JSON.parse(current); }catch(e){ return current; }
+      // only withdraw my own ring, never somebody else's
+      if(!room.voiceInvite || room.voiceInvite.by !== onlineSide) return current;
+      room.voiceInvite = null;
+      room.moveSeq = (room.moveSeq || 0) + 1;
+      return JSON.stringify(room);
+    }, true);
+  }
+  // called from applyRemoteState on every room update
+  function handleVoiceInviteState(inv){
+    voiceInvite = inv || null;
+    if(!inv || !inv.ts || !onlineSide) return;
+    if(inv.by === onlineSide) return;                                  // my own ring
+    if(inv.targets && inv.targets.indexOf(onlineSide) === -1) return;  // not aimed at me
+    if(inv.ts <= lastSeenGroupInviteTs) return;                        // already handled
+    if(groupVoiceActive || voiceActive) return;                        // already talking
+    // an invite left behind by someone who dropped out shouldn't ring later
+    if(Date.now() - inv.ts > 60000) return;
+    // don't ring twice if the 2-player call-state path already did
+    const modalEl = document.getElementById('incoming-call-modal');
+    if(modalEl && modalEl.classList.contains('show')) return;
+    lastSeenGroupInviteTs = inv.ts;
+    if(onlineMaxPlayers > 2){
+      pendingGroupVoiceInvite = true;
+    } else {
+      // 2-player table: leave both pending flags alone so Accept falls through
+      // to the normal in-room path, setCallState({accepted}). pendingDirect-
+      // CallIncoming belongs to the friend-call system and holds an object,
+      // not a boolean — setting it here would break acceptDirectCall().
+      voicePendingCaller = inv.by;
+    }
+    const titleEl = document.getElementById('incoming-call-title');
+    if(titleEl) titleEl.textContent = inv.team ? t('teamVoiceInviteTitle') : t('incomingCallTitle');
+    showIncomingCallModal(onlinePlayers[inv.by] || t('playerWord'));
+  }
   let lastSentCtlTs = 0;
   function voiceCtlPath(otherSeat, senderSeat){
     return 'voice-signal/' + onlineRoomId + '/' + pairKeyFor(onlineSide, otherSeat) + '/ctl-' + senderSeat;
@@ -9635,6 +9709,9 @@
 
   let groupVoiceInviteRefs = [];
   let lastSeenGroupInviteTs = 0;
+  // var, not let: joinOnlineRoom/applyRemoteState reference this mirror and
+  // must never hit a temporal-dead-zone error during startup
+  var voiceInvite = null;   // local mirror of room.voiceInvite
   let pendingGroupVoiceInvite = false;
   let lastSeenCtlTs = {};
   function startGroupVoiceInviteListener(){
@@ -9826,12 +9903,8 @@
     groupVoiceReconnectTimers = {};
     groupVoiceDisconnectedSince = {};
     groupVoiceFbRefs = {};
-    // withdraw my "come and talk" invite so nobody gets rung by a stale one
-    if(fbDb && onlineRoomId && onlineSide){
-      ALL_SEATS.filter(s => s !== onlineSide).forEach(seat => {
-        try{ fbDb.ref(voiceCtlPath(seat, onlineSide)).remove(); }catch(e){}
-      });
-    }
+    // withdraw my "come and talk" ring so nobody is called by a stale one
+    clearVoiceInvite();
   }
   // only the offer/answer/ICE children — the ctl-* nodes carry invites and
   // the teammate-only vote, and must survive someone leaving the channel
