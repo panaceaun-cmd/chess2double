@@ -577,16 +577,11 @@
   #board.board3d{
     --board-tilt:45deg;
     --piece-stand:calc(-1 * var(--board-tilt));
-    /* How far a standing piece is pulled back down onto its own square.
-       Needed because the board is foreshortened by rotateX while the piece
-       standing on it is not: a sprite ~1.2 squares tall, pinned to the
-       square's near edge, projects over ~1.7 on-screen ranks, so every piece
-       read as standing one rank further back. Applied along the piece's own
-       upright axis, so it inverts with the board exactly like --piece-stand.
-       Percentages are of the 260% sprite box, so one square = ~38.5%.
-       THIS IS THE ONE NUMBER TO TUNE: raise it to seat pieces lower, lower
-       it (or negate it) if they sit too deep. */
-    --piece-seat:21%;
+    /* Optional nudge along a standing piece's own upright axis. Kept at 0:
+       a tall piece overlapping the ranks behind it is how a real board looks,
+       and pulling it down instead pushed the back rank off the board edge.
+       Only touch this with a browser open to check the result. */
+    --piece-seat:0%;
     transform:rotateX(var(--board-tilt));
     transform-style:preserve-3d;
     /* preserve-3d is cancelled by any clipping/grouping property, so the 2D
@@ -603,7 +598,7 @@
   #board.board3d.flip180{ transform:rotateX(var(--board-tilt)) rotate(180deg); }
   /* When the board is flipped 180° about Z, its local X axis is inverted, so
      the counter-rotation that stands pieces up has to invert with it. */
-  #board.board3d.flip180{ --piece-stand:var(--board-tilt); --piece-seat:-21%; }
+  #board.board3d.flip180{ --piece-stand:var(--board-tilt); --piece-seat:0%; }
   #board.board3d .sq{ transform-style:preserve-3d; }
   /* Lacquered finish on the squares: a soft diagonal gloss plus a warm inner
      edge, so the board reads as polished rather than flat colour. Painted as
@@ -640,14 +635,7 @@
      treatment here so they look consistent with the procedural models
      instead of lying flat while everything else stands up. */
   #board.board3d .piece.piece3d, #board.board3d .piece.piece-vec{
-    /* The sprite is sized by its WIDTH here (background-size:contain in a box
-       far taller than it is wide), so this inset is what controls how tall a
-       piece draws. At -22.5% the box was 145% of a square wide, and because
-       the board is foreshortened by rotateX while the piece is not, that came
-       out roughly a whole rank of overhang — a piece on rank 8 read as
-       standing on rank 7. -10% keeps a physical piece's slight overlap of the
-       rank behind it without moving it off its own square. */
-    position:absolute; left:-10%; right:-10%; bottom:0;
+    position:absolute; left:-22.5%; right:-22.5%; bottom:0;
     height:260%;
     background-repeat:no-repeat;
     background-position:center bottom;
@@ -5124,7 +5112,7 @@
   const TILT_SCALE_AT_MIN = 1.22, TILT_SCALE_AT_MAX = 0.82;
   // Must stay equal to --piece-seat in the 3D CSS block: both describe the
   // same offset, one for resting pieces and one for animating ones.
-  const PIECE_SEAT_PCT = 21;
+  const PIECE_SEAT_PCT = 0;
   function pieceTiltScale(){
     const t = Math.max(TILT_MIN, Math.min(TILT_MAX, boardTilt3D));
     const frac = (t - TILT_MIN) / (TILT_MAX - TILT_MIN);
