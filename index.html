@@ -9931,6 +9931,7 @@
     // prompt as a 2-player call instead of having to notice the button
     // themselves. With teammate-only voice on, only my partners are rung.
     broadcastVoiceInvite(otherSeats, teamVoiceOnly && hasTeamPartners());
+    startGroupVoiceWatchdog();
   }
 
   // ---- voice control channel ----
@@ -10100,6 +10101,31 @@
     }
   }
 
+  // Heals the mesh without anyone pressing anything. A player who leaves and
+  // comes back leaves the other side holding a peer connection that has gone
+  // to "failed" — the per-peer retry gives up after RECONNECT_MAX_MS and then
+  // nothing ever tried again, so the link stayed dead until everybody left
+  // the voice chat. This re-negotiates any link that has actually died.
+  // Deliberately limited to connections that once existed and then failed:
+  // rebuilding for a seat that simply never joined would write a fresh offer
+  // into the database every few seconds for nothing.
+  let groupVoiceWatchdog = null;
+  function startGroupVoiceWatchdog(){
+    stopGroupVoiceWatchdog();
+    groupVoiceWatchdog = setInterval(() => {
+      if(!groupVoiceActive || !onlineRoomId){ stopGroupVoiceWatchdog(); return; }
+      voicePeerSeats().forEach(seat => {
+        const pc = groupVoicePeerConnections[seat];
+        if(!pc) return;
+        const st = pc.connectionState;
+        if(st === 'failed' || st === 'closed') establishGroupVoicePeer(seat);
+      });
+    }, 5000);
+  }
+  function stopGroupVoiceWatchdog(){
+    if(groupVoiceWatchdog){ clearInterval(groupVoiceWatchdog); groupVoiceWatchdog = null; }
+  }
+
   function establishGroupVoicePeer(otherSeat){
     if(!groupVoiceActive || !fbDb) return;
     const roomId = onlineRoomId;
@@ -10162,6 +10188,13 @@
         }, 3000);
       }
     };
+
+    // Clear MY old ICE candidates for this pair before renegotiating. They
+    // belong to the previous connection and are useless to the new one; left
+    // in place, a peer that rejoins feeds its partner a list of dead network
+    // routes and the link can sit in "checking" forever. Only my own list is
+    // touched — the partner clears theirs the same way.
+    try{ fbDb.ref(groupVoicePairPath(otherSeat, 'candidates-' + onlineSide)).remove(); }catch(e){}
 
     const amOfferer = onlineSide < otherSeat; // deterministic: lower seat number always offers
     let pendingCandidates = [];
@@ -10248,6 +10281,7 @@
     groupVoiceReconnectTimers = {};
     groupVoiceDisconnectedSince = {};
     groupVoiceFbRefs = {};
+    stopGroupVoiceWatchdog();
     // withdraw my "come and talk" ring so nobody is called by a stale one
     clearVoiceInvite();
   }
