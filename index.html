@@ -36,6 +36,34 @@
 <meta name="theme-color" content="#241812">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
+
+<!-- Link preview in messengers and social apps.
+     There were no Open Graph tags at all before, so every scraper had to
+     guess which image on the page represented the game — and they settled on
+     whatever they found first, which is why an old picture kept appearing
+     above shared links. These say it explicitly.
+     og:image MUST be an absolute URL: scrapers fetch it without a page
+     context, so a relative path resolves against their own host and fails.
+     1200x630 is the wide-banner ratio, which is what makes the preview render
+     large instead of as a small square thumbnail; the 1:1 version follows for
+     the apps that prefer square. Bump the ?v= number whenever the artwork
+     changes — messengers cache previews hard and otherwise keep serving the
+     old one. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="CHESS 2 DOUBLE">
+<meta property="og:title" content="CHESS 2 DOUBLE — 8×16">
+<meta property="og:description" content="Шахматы на доске 16×8 для 2, 3 и 4 игроков. Онлайн, голосовая связь, игра с ботом.">
+<meta property="og:url" content="https://panaceaun-cmd.github.io/chess2double/">
+<meta property="og:image" content="https://panaceaun-cmd.github.io/chess2double/og-image.png?v=2">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="CHESS 2 DOUBLE">
+<meta property="og:image" content="https://panaceaun-cmd.github.io/chess2double/og-image-square.png?v=2">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="CHESS 2 DOUBLE — 8×16">
+<meta name="twitter:description" content="Шахматы на доске 16×8 для 2, 3 и 4 игроков. Онлайн, голосовая связь, игра с ботом.">
+<meta name="twitter:image" content="https://panaceaun-cmd.github.io/chess2double/og-image.png?v=2">
+<meta name="description" content="Шахматы на доске 16×8 для 2, 3 и 4 игроков. Онлайн, голосовая связь, игра с ботом.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <!-- Firebase (Realtime Database) — used for online multiplayer: lobby, matchmaking, live game sync -->
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
