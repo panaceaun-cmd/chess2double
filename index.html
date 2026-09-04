@@ -2180,6 +2180,17 @@
           <label for="ptt-mode-toggle-2" id="ptt-mode-label-2" style="cursor:pointer;">🎙️ Режим рации</label>
           <span id="ptt-mode-hint" style="font-size:11px; color:var(--ink-dim); width:100%;">Чтобы говорить — зажмите правую кнопку мыши или кнопку под доской</span>
         </div>
+        <div class="voice-chat-row" id="voice-quality-row" style="display:flex; align-items:center; gap:8px; font-size:12.5px; flex-wrap:wrap;">
+          <label for="voice-volume-range" id="voice-volume-label" style="flex:0 0 auto;">🔊 Громкость</label>
+          <input type="range" id="voice-volume-range" min="0" max="100" step="5" value="100" style="flex:1; min-width:110px;">
+          <span class="outline-value" id="voice-volume-value">100%</span>
+          <label for="voice-quality-select" id="voice-quality-label" style="flex:0 0 auto;">📶 Качество</label>
+          <select id="voice-quality-select" style="flex:0 0 auto;">
+            <option value="low">Экономное</option>
+            <option value="normal">Обычное</option>
+            <option value="high">Высокое</option>
+          </select>
+        </div>
         <div class="voice-chat-row" id="team-voice-row" style="display:flex; align-items:center; gap:6px; font-size:12.5px; flex-wrap:wrap;">
           <input type="checkbox" id="team-voice-toggle">
           <label for="team-voice-toggle" id="team-voice-label" style="cursor:pointer;">👥 Отдельная связь между напарниками</label>
@@ -9032,7 +9043,49 @@
     sampleRate: 48000,
     channelCount: 1
   };
-  function boostOpusBitrate(sdp){
+  // Which negotiation each peer is currently on, so a rebuilt partner can be
+  // told apart from a repeat of the offer we already answered.
+  var groupVoiceSessionId = {};
+
+  // ---- voice quality and volume ----
+  // Quality sets the Opus bitrate written into the SDP; it only takes effect
+  // on the NEXT negotiation, so changing it renegotiates every live link.
+  // Volume applies instantly to the audio elements carrying the other
+  // players — it is playback only and does not touch anyone's microphone.
+  const VOICE_QUALITY_BITRATE = { low: 24000, normal: 64000, high: 128000 };
+  var voiceQuality = 'high';
+  var voiceOutputVolume = 1;
+  try{
+    const q = localStorage.getItem('chess2-voice-quality');
+    if(q && VOICE_QUALITY_BITRATE[q]) voiceQuality = q;
+    const v = parseFloat(localStorage.getItem('chess2-voice-volume'));
+    if(isFinite(v)) voiceOutputVolume = Math.max(0, Math.min(1, v));
+  }catch(e){}
+
+  function applyVoiceBitrate(sdp){
+    return boostOpusBitrate(sdp, VOICE_QUALITY_BITRATE[voiceQuality] || 128000);
+  }
+  function applyVoiceOutputVolume(){
+    Object.keys(groupVoiceRemoteAudioEls).forEach(seat => {
+      const el = groupVoiceRemoteAudioEls[seat];
+      if(el) el.volume = voiceOutputVolume;
+    });
+    document.querySelectorAll('audio[data-voice-remote]').forEach(el => { el.volume = voiceOutputVolume; });
+  }
+  function setVoiceQuality(q){
+    if(!VOICE_QUALITY_BITRATE[q]) return;
+    voiceQuality = q;
+    try{ localStorage.setItem('chess2-voice-quality', q); }catch(e){}
+    // renegotiate every live link so the new bitrate actually applies
+    if(groupVoiceActive) voicePeerSeats().forEach(seat => establishGroupVoicePeer(seat));
+  }
+  function setVoiceOutputVolume(v){
+    voiceOutputVolume = Math.max(0, Math.min(1, v));
+    try{ localStorage.setItem('chess2-voice-volume', String(voiceOutputVolume)); }catch(e){}
+    applyVoiceOutputVolume();
+  }
+
+  function boostOpusBitrate(sdp, bitrate){
     const lines = sdp.split('\r\n');
     let opusPt = null;
     for(const line of lines){
@@ -9042,7 +9095,7 @@
     if(!opusPt) return sdp;
     return lines.map(line => {
       if(line.indexOf('a=fmtp:' + opusPt) === 0 && line.indexOf('maxaveragebitrate') === -1){
-        return line + ';maxaveragebitrate=128000;stereo=0;useinbandfec=1';
+        return line + ';maxaveragebitrate=' + (bitrate || 128000) + ';stereo=0;useinbandfec=1';
       }
       return line;
     }).join('\r\n');
@@ -10146,6 +10199,8 @@
         groupVoiceRemoteAudioEls[otherSeat] = audioEl;
       }
       audioEl.srcObject = event.streams[0];
+      audioEl.dataset.voiceRemote = '1';
+      audioEl.volume = voiceOutputVolume;
       playRemoteAudio(audioEl);
     };
 
@@ -10210,10 +10265,19 @@
       if(amOfferer){
         await fbDb.ref(groupVoicePairPath(otherSeat, 'offer')).remove();
         await fbDb.ref(groupVoicePairPath(otherSeat, 'answer')).remove();
+        // Every negotiation carries a session id. Without it the two sides
+        // could not tell a NEW offer from the one they had already answered:
+        // the listener below bails out as soon as it has a remote
+        // description, so a partner who rejoined wrote a fresh offer that the
+        // other end silently ignored. The link then looked established while
+        // no audio flowed — which is exactly the "some players can't hear
+        // each other" symptom.
+        const sid = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+        groupVoiceSessionId[otherSeat] = sid;
         const offer = await pc.createOffer();
-        offer.sdp = boostOpusBitrate(offer.sdp);
+        offer.sdp = applyVoiceBitrate(offer.sdp);
         await pc.setLocalDescription(offer);
-        const offerPayload = await encryptVoiceSignal(roomId, JSON.stringify(offer));
+        const offerPayload = await encryptVoiceSignal(roomId, JSON.stringify({sid: sid, offer: offer}));
         await fbDb.ref(groupVoicePairPath(otherSeat, 'offer')).set(offerPayload);
         const answerRef = fbDb.ref(groupVoicePairPath(otherSeat, 'answer'));
         answerRef.on('value', async (snap) => {
@@ -10221,7 +10285,11 @@
           if(!raw || !pc || pc.currentRemoteDescription) return;
           try{
             const decrypted = await decryptVoiceSignal(roomId, raw);
-            await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(decrypted)));
+            const msg = JSON.parse(decrypted);
+            const ans = msg.answer || msg;          // tolerate the older shape
+            // an answer to a negotiation we have already replaced is useless
+            if(msg.sid && msg.sid !== groupVoiceSessionId[otherSeat]) return;
+            await pc.setRemoteDescription(new RTCSessionDescription(ans));
             await flushPendingCandidates();
           }catch(e){}
         });
@@ -10230,15 +10298,29 @@
         const offerRef = fbDb.ref(groupVoicePairPath(otherSeat, 'offer'));
         offerRef.on('value', async (snap) => {
           const raw = snap.val();
-          if(!raw || !pc || pc.currentRemoteDescription) return;
+          if(!raw || !pc) return;
           try{
             const decrypted = await decryptVoiceSignal(roomId, raw);
-            await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(decrypted)));
+            const msg = JSON.parse(decrypted);
+            const off = msg.offer || msg;           // tolerate the older shape
+            const sid = msg.sid || 'legacy';
+            if(pc.currentRemoteDescription){
+              // Already negotiated. If this is the SAME session there is
+              // nothing to do; if it is a new one, the partner has rebuilt
+              // and we must start over with a fresh connection instead of
+              // ignoring them — this is what used to leave the pair mute.
+              if(groupVoiceSessionId[otherSeat] === sid) return;
+              groupVoiceSessionId[otherSeat] = sid;
+              establishGroupVoicePeer(otherSeat);
+              return;
+            }
+            groupVoiceSessionId[otherSeat] = sid;
+            await pc.setRemoteDescription(new RTCSessionDescription(off));
             await flushPendingCandidates();
             const answer = await pc.createAnswer();
-            answer.sdp = boostOpusBitrate(answer.sdp);
+            answer.sdp = applyVoiceBitrate(answer.sdp);
             await pc.setLocalDescription(answer);
-            const answerPayload = await encryptVoiceSignal(roomId, JSON.stringify(answer));
+            const answerPayload = await encryptVoiceSignal(roomId, JSON.stringify({sid: sid, answer: answer}));
             await fbDb.ref(groupVoicePairPath(otherSeat, 'answer')).set(answerPayload);
           }catch(e){}
         });
@@ -10453,6 +10535,26 @@
   // kept so the room lifecycle calls stay in one place
   function startTeamVoiceRequestListener(){ closeTeamVoiceVote(); }
   function stopTeamVoiceRequestListener(){ closeTeamVoiceVote(); }
+
+  (function initVoiceQualityControls(){
+    const vol = document.getElementById('voice-volume-range');
+    const volVal = document.getElementById('voice-volume-value');
+    const qual = document.getElementById('voice-quality-select');
+    if(vol){
+      vol.value = String(Math.round(voiceOutputVolume * 100));
+      if(volVal) volVal.textContent = Math.round(voiceOutputVolume * 100) + '%';
+      // 'input' rather than 'change': the level should follow the finger
+      vol.addEventListener('input', (e) => {
+        const pct = parseInt(e.target.value, 10) || 0;
+        setVoiceOutputVolume(pct / 100);
+        if(volVal) volVal.textContent = pct + '%';
+      });
+    }
+    if(qual){
+      qual.value = voiceQuality;
+      qual.addEventListener('change', (e) => setVoiceQuality(e.target.value));
+    }
+  })();
 
   (function initTeamVoiceControls(){
     const box = document.getElementById('team-voice-toggle');
