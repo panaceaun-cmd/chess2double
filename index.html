@@ -10216,6 +10216,8 @@
   var groupVoiceEverConnected = {};
   var groupVoiceLastRebuild = {};
   var groupVoiceDeadSid = {};            // sessions whose leftovers must be ignored
+  var groupVoicePeerStarted = {};        // when each link began negotiating
+  const VOICE_STALL_MS = 12000;          // no progress for this long = stalled
   var groupVoiceOutageAnnounced = {};    // so the chat gets one notice per outage
   const VOICE_REBUILD_COOLDOWN_MS = 6000;
 
@@ -10244,8 +10246,17 @@
         // watchdog skipped anything without one — so the very case it was
         // meant to cover, a partner who left and came back, was the one case
         // it ignored. That is why the link only ever came back by hand.
-      const dead = (st === 'gone' || st === 'failed' || st === 'closed' || st === 'disconnected');
+      // 'new' and 'connecting' are not failures by themselves, but a
+      // negotiation that never moves on is just as broken as one that failed
+      // — and it never reports itself, so nothing ever retried it.
+      const started = groupVoicePeerStarted[seat] || 0;
+      const stalled = (st === 'new' || st === 'connecting') &&
+                      started && (now - started > VOICE_STALL_MS);
+      const dead = stalled || st === 'gone' || st === 'failed' ||
+                   st === 'closed' || st === 'disconnected';
       if(!dead) return;
+      if(stalled) vlog('stalled negotiation', onlineSide + '->' + seat, st,
+                       Math.round((now - started) / 1000) + 's');
       if(now - (groupVoiceLastRebuild[seat] || 0) < VOICE_REBUILD_COOLDOWN_MS) return;
       groupVoiceLastRebuild[seat] = now;
       // The offer from the session that just died is still sitting in the
@@ -10315,6 +10326,7 @@
 
     vlog('building link', onlineSide + '<->' + otherSeat,
          'I offer:' + (onlineSide < otherSeat));
+    groupVoicePeerStarted[otherSeat] = Date.now();
     const pc = new RTCPeerConnection(RTC_CONFIG);
     groupVoicePeerConnections[otherSeat] = pc;
     pc.oniceconnectionstatechange = () => vlog('ICE', onlineSide + '->' + otherSeat, pc.iceConnectionState);
@@ -10399,6 +10411,7 @@
       }
     }
     (async () => {
+     try{
       if(amOfferer){
         await fbDb.ref(groupVoicePairPath(otherSeat, 'offer')).remove();
         await fbDb.ref(groupVoicePairPath(otherSeat, 'answer')).remove();
@@ -10471,6 +10484,14 @@
         });
         groupVoiceFbRefs[otherSeat].push(offerRef);
       }
+     }catch(err){
+       // Until now this ran with no error handling at all: anything thrown
+       // here (a rejected database write, a createOffer failure) aborted the
+       // negotiation silently and left the connection sitting at "new" for
+       // ever, which is exactly what the report showed.
+       vlog('NEGOTIATION FAILED', onlineSide + '->' + otherSeat, (err && err.message) || err);
+       appendChatMessage(t('systemLabel'), '⚠️ voice: ' + otherSeat + ' — ' + ((err && err.message) || 'ошибка согласования'), true);
+     }
       const candRef = fbDb.ref(groupVoicePairPath(otherSeat, 'candidates-' + otherSeat));
       candRef.on('child_added', async (snap) => {
         if(!pc) return;
@@ -10513,6 +10534,7 @@
     groupVoiceLastRebuild = {};
     groupVoiceDeadSid = {};
     groupVoiceOutageAnnounced = {};
+    groupVoicePeerStarted = {};
     // withdraw my "come and talk" ring so nobody is called by a stale one
     clearVoiceInvite();
   }
