@@ -12161,10 +12161,38 @@
     if(!boardEl || boardEl.dataset.clicksBound === '1') return;
     boardEl.dataset.clicksBound = '1';
     boardEl.addEventListener('click', (e) => {
-      const sq = e.target && e.target.closest ? e.target.closest('.sq') : null;
-      if(!sq || !boardEl.contains(sq)) return;
+      let sq = e.target && e.target.closest ? e.target.closest('.sq') : null;
+      if(sq && !boardEl.contains(sq)) sq = null;
+      // In 3D the board is tilted with rotateX, so each cell is drawn as a
+      // trapezoid while the browser hit-tests it as that shape too — between
+      // the projected cells there are slivers where the click lands on the
+      // board itself and nothing happens. Measured: about one click in four
+      // inside the board area either did nothing or resolved to a neighbour.
+      // Falling back to the visually nearest cell makes every click inside
+      // the board act on the cell the player is actually pointing at.
+      if(!sq) sq = nearestSquareTo(e.clientX, e.clientY);
+      if(!sq) return;
       onSquareClick({ currentTarget: sq });
     });
+  }
+  function nearestSquareTo(x, y){
+    const boardEl = document.getElementById('board');
+    const cache = boardEl && boardEl.__sqCache;
+    if(!cache || !cache.length) return null;
+    let best = null, bestDist = Infinity, reach = 0;
+    for(let i = 0; i < cache.length; i++){
+      const sq = cache[i];
+      if(!sq) continue;
+      const r = sq.getBoundingClientRect();
+      if(!r.width || !r.height) continue;
+      // one cell's own size sets how far a click may be adopted, so a click
+      // outside the board is still ignored rather than snapping to an edge
+      const span = Math.hypot(r.width, r.height) * 0.6;
+      if(span > reach) reach = span;
+      const d = Math.hypot(x - (r.left + r.width / 2), y - (r.top + r.height / 2));
+      if(d < bestDist){ bestDist = d; best = sq; }
+    }
+    return (best && bestDist <= reach) ? best : null;
   }
   function onSquareClick(e){
     if(gameOver) return;
