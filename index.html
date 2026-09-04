@@ -9987,8 +9987,28 @@
     if(!inv || !inv.ts || !onlineSide) return;
     if(inv.by === onlineSide) return;                                  // my own ring
     if(inv.targets && inv.targets.indexOf(onlineSide) === -1) return;  // not aimed at me
+    // Someone joined the voice chat while I was ALREADY in it. startGroupVoice()
+    // only ever connects to the seats present when it ran, so whoever was in
+    // the channel first never built a link to a later arrival — which is why
+    // some players could hear each other and others could not. Build the
+    // missing link now. Both ends do this; the pair's lower seat offers, so
+    // they converge on one connection rather than two competing ones.
+    if(groupVoiceActive){
+      if(voicePeerSeats().indexOf(inv.by) === -1) return;   // not someone I should hear
+      // Rebuild unconditionally, not only when the link looks dead. The
+      // negotiation is one-shot: each side ignores an offer once it already
+      // has a remote description, so a peer that rejoins writes a fresh offer
+      // that the other end silently discards — the link then LOOKS alive
+      // while no audio flows. Tearing it down and renegotiating from scratch
+      // is the only way both ends end up on the same session. The pair's
+      // lower seat offers, so the two sides converge rather than compete.
+      if(lastInviteRebuiltTs[inv.by] === inv.ts) return;   // already redone for this one
+      lastInviteRebuiltTs[inv.by] = inv.ts;
+      establishGroupVoicePeer(inv.by);
+      return;
+    }
     if(inv.ts <= lastSeenGroupInviteTs) return;                        // already handled
-    if(groupVoiceActive || voiceActive) return;                        // already talking
+    if(voiceActive) return;                                            // already on a call
     // an invite left behind by someone who dropped out shouldn't ring later
     if(Date.now() - inv.ts > 60000) return;
     // don't ring twice if the 2-player call-state path already did
@@ -10034,6 +10054,9 @@
   // var, not let: joinOnlineRoom/applyRemoteState reference this mirror and
   // must never hit a temporal-dead-zone error during startup
   var voiceInvite = null;   // local mirror of room.voiceInvite
+  // per seat: which invite we have already renegotiated for, so a single
+  // rejoin rebuilds the link once instead of on every room update
+  var lastInviteRebuiltTs = {};
   let pendingGroupVoiceInvite = false;
   let lastSeenCtlTs = {};
   function startGroupVoiceInviteListener(){
