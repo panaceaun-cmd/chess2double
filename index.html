@@ -2180,19 +2180,10 @@
           <label for="ptt-mode-toggle-2" id="ptt-mode-label-2" style="cursor:pointer;">🎙️ Режим рации</label>
           <span id="ptt-mode-hint" style="font-size:11px; color:var(--ink-dim); width:100%;">Чтобы говорить — зажмите правую кнопку мыши или кнопку под доской</span>
         </div>
-        <div class="voice-chat-row" id="voice-diag-row" style="display:flex; align-items:center; gap:8px;">
-          <button type="button" class="btn secondary small" id="voice-diag-btn">🩺 Диагностика связи</button>
-        </div>
         <div class="voice-chat-row" id="voice-quality-row" style="display:flex; align-items:center; gap:8px; font-size:12.5px; flex-wrap:wrap;">
           <label for="voice-volume-range" id="voice-volume-label" style="flex:0 0 auto;">🔊 Громкость</label>
           <input type="range" id="voice-volume-range" min="0" max="100" step="5" value="100" style="flex:1; min-width:110px;">
           <span class="outline-value" id="voice-volume-value">100%</span>
-          <label for="voice-quality-select" id="voice-quality-label" style="flex:0 0 auto;">📶 Качество</label>
-          <select id="voice-quality-select" style="flex:0 0 auto;">
-            <option value="low">Экономное</option>
-            <option value="normal">Обычное</option>
-            <option value="high">Высокое</option>
-          </select>
         </div>
         <div class="voice-chat-row" id="team-voice-row" style="display:flex; align-items:center; gap:6px; font-size:12.5px; flex-wrap:wrap;">
           <input type="checkbox" id="team-voice-toggle">
@@ -9096,32 +9087,66 @@
   // on the NEXT negotiation, so changing it renegotiates every live link.
   // Volume applies instantly to the audio elements carrying the other
   // players — it is playback only and does not touch anyone's microphone.
-  const VOICE_QUALITY_BITRATE = { low: 24000, normal: 64000, high: 128000 };
-  var voiceQuality = 'high';
+  // Always the top bitrate — there is no reason to offer anything less, and a
+  // setting nobody would sensibly lower is a setting worth removing.
+  const VOICE_BITRATE = 128000;
+  var voiceQuality = 'high';   // kept for the diagnostics report
   var voiceOutputVolume = 1;
   try{
-    const q = localStorage.getItem('chess2-voice-quality');
-    if(q && VOICE_QUALITY_BITRATE[q]) voiceQuality = q;
     const v = parseFloat(localStorage.getItem('chess2-voice-volume'));
     if(isFinite(v)) voiceOutputVolume = Math.max(0, Math.min(1, v));
   }catch(e){}
 
   function applyVoiceBitrate(sdp){
-    return boostOpusBitrate(sdp, VOICE_QUALITY_BITRATE[voiceQuality] || 128000);
+    return boostOpusBitrate(sdp, VOICE_BITRATE);
   }
+  // ---- loudspeaker on phones and tablets ----
+  // Mobile browsers route WebRTC audio to the EARPIECE by default, which is
+  // why a phone held on the table sounds almost silent. The web platform has
+  // no switch for this: setSinkId() is desktop-only, and nothing else exposes
+  // the audio route. What CAN be done is stack every hint that pushes the
+  // browser toward the loudspeaker, and that is what this does:
+  //   * playsinline — stops iOS taking the stream over full screen, which is
+  //     what forces it onto the earpiece there;
+  //   * full element volume, never muted;
+  //   * setSinkId to a device whose label names a speaker, where supported.
+  // Best effort by nature. If a device still uses the earpiece, the system
+  // speaker button during a call is the only reliable override.
+  const IS_TOUCH_DEVICE = (function(){
+    try{
+      return (navigator.maxTouchPoints || 0) > 0 ||
+             /Android|iPhone|iPad|iPod|Mobile|Tablet/i.test(navigator.userAgent || '');
+    }catch(e){ return false; }
+  })();
+
+  async function routeToLoudspeaker(audioEl){
+    if(!audioEl) return;
+    try{
+      audioEl.setAttribute('playsinline', '');
+      audioEl.setAttribute('webkit-playsinline', '');
+      audioEl.muted = false;
+      audioEl.volume = voiceOutputVolume;
+    }catch(e){}
+    if(!IS_TOUCH_DEVICE) return;
+    try{
+      if(typeof audioEl.setSinkId !== 'function' || !navigator.mediaDevices ||
+         !navigator.mediaDevices.enumerateDevices) return;
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const speaker = devices.find(d => d.kind === 'audiooutput' &&
+        /speaker|speakerphone|динамик|громк/i.test(d.label || ''));
+      if(speaker) await audioEl.setSinkId(speaker.deviceId);
+    }catch(e){ /* unsupported on this device — the hints above still apply */ }
+  }
+
   function applyVoiceOutputVolume(){
     Object.keys(groupVoiceRemoteAudioEls).forEach(seat => {
       const el = groupVoiceRemoteAudioEls[seat];
       if(el) el.volume = voiceOutputVolume;
     });
-    document.querySelectorAll('audio[data-voice-remote]').forEach(el => { el.volume = voiceOutputVolume; });
-  }
-  function setVoiceQuality(q){
-    if(!VOICE_QUALITY_BITRATE[q]) return;
-    voiceQuality = q;
-    try{ localStorage.setItem('chess2-voice-quality', q); }catch(e){}
-    // renegotiate every live link so the new bitrate actually applies
-    if(groupVoiceActive) voicePeerSeats().forEach(seat => establishGroupVoicePeer(seat));
+    document.querySelectorAll('audio[data-voice-remote]').forEach(el => {
+      el.volume = voiceOutputVolume;
+      routeToLoudspeaker(el);
+    });
   }
   function setVoiceOutputVolume(v){
     voiceOutputVolume = Math.max(0, Math.min(1, v));
@@ -9301,7 +9326,9 @@
         directCallRemoteAudioEl.autoplay = true;
         document.body.appendChild(directCallRemoteAudioEl);
       }
+      directCallRemoteAudioEl.dataset.voiceRemote = '1';
       directCallRemoteAudioEl.srcObject = event.streams[0];
+      routeToLoudspeaker(directCallRemoteAudioEl);
       playRemoteAudio(directCallRemoteAudioEl);
     };
     const dcPath = (suffix) => 'direct-voice-signal/' + callId + '/' + suffix;
@@ -9688,9 +9715,11 @@
       if(!voiceRemoteAudioEl){
         voiceRemoteAudioEl = document.createElement('audio');
         voiceRemoteAudioEl.autoplay = true;
+        voiceRemoteAudioEl.dataset.voiceRemote = '1';
         document.body.appendChild(voiceRemoteAudioEl);
       }
       voiceRemoteAudioEl.srcObject = event.streams[0];
+      routeToLoudspeaker(voiceRemoteAudioEl);
       playRemoteAudio(voiceRemoteAudioEl);
       updateVoiceDiagnostics();
     };
@@ -10343,6 +10372,7 @@
       audioEl.srcObject = event.streams[0];
       audioEl.dataset.voiceRemote = '1';
       audioEl.volume = voiceOutputVolume;
+      routeToLoudspeaker(audioEl);
       playRemoteAudio(audioEl);
     };
 
@@ -10707,42 +10737,10 @@
   function startTeamVoiceRequestListener(){ closeTeamVoiceVote(); }
   function stopTeamVoiceRequestListener(){ closeTeamVoiceVote(); }
 
-  // Puts the voice report straight into the game chat. DevTools is a big ask
-  // on a phone and easy to get wrong on a desktop — a filter typed into the
-  // Styles pane instead of the Console shows nothing at all — so the same
-  // information is available without leaving the game.
-  (function initVoiceDiagnostics(){
-    const btn = document.getElementById('voice-diag-btn');
-    if(!btn) return;
-    btn.addEventListener('click', () => {
-      let r;
-      try{ r = window.voiceReport(); }catch(e){ r = null; }
-      if(!r){ appendChatMessage(t('systemLabel'), 'voice: report unavailable', true); return; }
-      const lines = [];
-      lines.push('место: ' + (r.mySeat || '—') +
-                 ' | голос: ' + (r.groupVoiceActive ? 'вкл' : 'выкл') +
-                 ' | только напарники: ' + (r.teammatesOnly ? 'да' : 'нет'));
-      lines.push('должен слышать: ' + (r.shouldHear.length ? r.shouldHear.join(', ') : '—'));
-      const seats = Object.keys(r.peers);
-      if(!seats.length){
-        lines.push('соединений нет');
-      } else {
-        seats.forEach(seat => {
-          const p = r.peers[seat];
-          lines.push(seat + ': ' + p.connection + ' / ICE ' + p.ice +
-                     ' | sid ' + String(p.sid).slice(0, 8) +
-                     ' | звук ' + (p.audio ? 'есть' : 'нет'));
-        });
-      }
-      lines.push('громкость ' + Math.round(r.volume * 100) + '% | качество ' + r.quality);
-      appendChatMessage(t('systemLabel'), lines.join('\n'), true);
-    });
-  })();
-
   (function initVoiceQualityControls(){
     const vol = document.getElementById('voice-volume-range');
     const volVal = document.getElementById('voice-volume-value');
-    const qual = document.getElementById('voice-quality-select');
+
     if(vol){
       vol.value = String(Math.round(voiceOutputVolume * 100));
       if(volVal) volVal.textContent = Math.round(voiceOutputVolume * 100) + '%';
@@ -10752,10 +10750,6 @@
         setVoiceOutputVolume(pct / 100);
         if(volVal) volVal.textContent = pct + '%';
       });
-    }
-    if(qual){
-      qual.value = voiceQuality;
-      qual.addEventListener('change', (e) => setVoiceQuality(e.target.value));
     }
   })();
 
