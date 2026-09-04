@@ -10215,6 +10215,8 @@
   // instead of being offered a connection every few seconds.
   var groupVoiceEverConnected = {};
   var groupVoiceLastRebuild = {};
+  var groupVoiceDeadSid = {};            // sessions whose leftovers must be ignored
+  var groupVoiceOutageAnnounced = {};    // so the chat gets one notice per outage
   const VOICE_REBUILD_COOLDOWN_MS = 6000;
 
   function startGroupVoiceWatchdog(){
@@ -10246,9 +10248,25 @@
       if(!dead) return;
       if(now - (groupVoiceLastRebuild[seat] || 0) < VOICE_REBUILD_COOLDOWN_MS) return;
       groupVoiceLastRebuild[seat] = now;
+      // The offer from the session that just died is still sitting in the
+      // database. Rebuilding, the non-offering side read it straight back and
+      // answered a peer that no longer exists — ICE then sat in "checking"
+      // for ever. Mark that session dead so its leftovers are ignored.
+      if(groupVoiceSessionId[seat]) groupVoiceDeadSid[seat] = groupVoiceSessionId[seat];
       vlog('auto-reconnect', onlineSide + '->' + seat, 'was:' + st);
-      appendChatMessage(t('systemLabel'), '\u267B\uFE0F \u0432\u043E\u0441\u0441\u0442\u0430\u043D\u0430\u0432\u043B\u0438\u0432\u0430\u044E \u0433\u043E\u043B\u043E\u0441\u043E\u0432\u0443\u044E \u0441\u0432\u044F\u0437\u044C: ' + seat, true);
+      // Announce the drop once per outage, not once per retry.
+      if(!groupVoiceOutageAnnounced[seat]){
+        groupVoiceOutageAnnounced[seat] = true;
+        appendChatMessage(t('systemLabel'), '\u267B\uFE0F \u0432\u043E\u0441\u0441\u0442\u0430\u043D\u0430\u0432\u043B\u0438\u0432\u0430\u044E \u0433\u043E\u043B\u043E\u0441\u043E\u0432\u0443\u044E \u0441\u0432\u044F\u0437\u044C: ' + seat, true);
+      }
       establishGroupVoicePeer(seat);
+      // A new session can only be created by the pair's OFFERER. When the
+      // dead link is noticed by the other side, rebuilding alone achieves
+      // nothing — it just re-reads the stale offer. Poking the partner makes
+      // them run establishGroupVoicePeer() too, and if they are the offerer
+      // that produces a fresh offer with a new session id. Aimed at this one
+      // seat, so nobody else is rung.
+      broadcastVoiceInvite([seat], teamVoiceOnly && hasTeamPartners());
     });
   }
   function stopGroupVoiceWatchdog(){
@@ -10329,6 +10347,11 @@
       const statusEl = document.getElementById('voice-chat-status');
       if(st === 'connected'){
         groupVoiceEverConnected[otherSeat] = true;   // worth retrying forever now
+        delete groupVoiceDeadSid[otherSeat];
+        if(groupVoiceOutageAnnounced[otherSeat]){
+          delete groupVoiceOutageAnnounced[otherSeat];
+          appendChatMessage(t('systemLabel'), '\u2705 \u0433\u043E\u043B\u043E\u0441\u043E\u0432\u0430\u044F \u0441\u0432\u044F\u0437\u044C \u0432\u043E\u0441\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u0430: ' + otherSeat, true);
+        }
         if(groupVoiceReconnectTimers[otherSeat]){ clearTimeout(groupVoiceReconnectTimers[otherSeat]); delete groupVoiceReconnectTimers[otherSeat]; }
         delete groupVoiceDisconnectedSince[otherSeat];
         if(statusEl) statusEl.textContent = t('voiceChatConnected');
@@ -10419,6 +10442,10 @@
             const msg = JSON.parse(decrypted);
             const off = msg.offer || msg;           // tolerate the older shape
             const sid = msg.sid || 'legacy';
+            if(groupVoiceDeadSid[otherSeat] === sid){
+              vlog('ignoring stale offer', otherSeat, 'sid=' + sid);
+              return;   // leftover from the connection that just failed
+            }
             if(pc.currentRemoteDescription){
               // Already negotiated. If this is the SAME session there is
               // nothing to do; if it is a new one, the partner has rebuilt
@@ -10484,6 +10511,8 @@
     stopGroupVoiceWatchdog();
     groupVoiceEverConnected = {};
     groupVoiceLastRebuild = {};
+    groupVoiceDeadSid = {};
+    groupVoiceOutageAnnounced = {};
     // withdraw my "come and talk" ring so nobody is called by a stale one
     clearVoiceInvite();
   }
