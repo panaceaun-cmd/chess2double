@@ -8192,6 +8192,9 @@
     handleTeamVoiceReqState(room.teamVoiceReq || null);
     // ...and so does the "come and talk" ring
     handleVoiceInviteState(room.voiceInvite || null);
+    // A player rejoining shows up here first, so this is the earliest moment
+    // a dead voice link can be noticed and rebuilt.
+    try{ sweepGroupVoiceLinks(); }catch(e){}
     applyRoomStyleFields(room);
     if(room.players){
       const wasIncomplete = Object.values(onlinePlayers).some(v => !v) || Object.keys(onlinePlayers).length < (room.maxPlayers||2);
@@ -10215,24 +10218,34 @@
     stopGroupVoiceWatchdog();
     groupVoiceWatchdog = setInterval(() => {
       if(!groupVoiceActive || !onlineRoomId){ stopGroupVoiceWatchdog(); return; }
-      const now = Date.now();
-      voicePeerSeats().forEach(seat => {
-        if(!groupVoiceEverConnected[seat]) return;      // never talked to us
-        const pc = groupVoicePeerConnections[seat];
-        const st = pc ? pc.connectionState : 'gone';
+      sweepGroupVoiceLinks();
+    }, 3000);
+  }
+  // The same check, callable on demand. A timer alone was not enough: the
+  // moment that matters is a player REJOINING, and that arrives as a room
+  // update, so the sweep is run from there as well. Waiting up to 3 seconds
+  // for the next tick — or for a timer that had never been started because
+  // the voice chat began before the partner was in the room — is exactly how
+  // the automatic restart came to look like it never fired.
+  function sweepGroupVoiceLinks(){
+    if(!groupVoiceActive || !onlineRoomId) return;
+    const now = Date.now();
+    voicePeerSeats().forEach(seat => {
+      if(!groupVoiceEverConnected[seat]) return;      // never talked to us
+      const pc = groupVoicePeerConnections[seat];
+      const st = pc ? pc.connectionState : 'gone';
         // 'gone' matters as much as 'failed': when the per-peer retry gives
         // up it DELETES the connection, and the previous version of this
         // watchdog skipped anything without one — so the very case it was
         // meant to cover, a partner who left and came back, was the one case
         // it ignored. That is why the link only ever came back by hand.
-        const dead = (st === 'gone' || st === 'failed' || st === 'closed' || st === 'disconnected');
-        if(!dead) return;
-        if(now - (groupVoiceLastRebuild[seat] || 0) < VOICE_REBUILD_COOLDOWN_MS) return;
-        groupVoiceLastRebuild[seat] = now;
-        vlog('auto-reconnect', onlineSide + '->' + seat, 'was:' + st);
-        establishGroupVoicePeer(seat);
-      });
-    }, 3000);
+      const dead = (st === 'gone' || st === 'failed' || st === 'closed' || st === 'disconnected');
+      if(!dead) return;
+      if(now - (groupVoiceLastRebuild[seat] || 0) < VOICE_REBUILD_COOLDOWN_MS) return;
+      groupVoiceLastRebuild[seat] = now;
+      vlog('auto-reconnect', onlineSide + '->' + seat, 'was:' + st);
+      establishGroupVoicePeer(seat);
+    });
   }
   function stopGroupVoiceWatchdog(){
     if(groupVoiceWatchdog){ clearInterval(groupVoiceWatchdog); groupVoiceWatchdog = null; }
