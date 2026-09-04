@@ -961,12 +961,22 @@
     display:inline-flex; align-items:center; justify-content:center;
     width:28px; height:28px; border-radius:4px;
     background:#e8dcbc;
-    /* These little icons are only 28px, so the adjustable piece outline —
-       which can go up to 3px — would swallow them whole. They keep a fixed
-       hairline of their own instead, independent of that setting. */
-    -webkit-text-stroke-width:0.4px;
   }
-  #captured-panel .cap-icon{ -webkit-text-stroke-width:0.4px; }
+  /* Captured-piece icons are only 20–28px, so the adjustable piece outline —
+     up to 3px wide and any colour — would swallow them or wash them out.
+     They carry the .piece colour classes (for the fill), which is where they
+     were picking that outline up: .piece.white and friends point
+     --piece-stroke-w / --piece-stroke-color at the live per-colour settings.
+     Overriding both here pins them to a fixed black hairline, so changing the
+     outline on the board leaves this panel alone. !important because those
+     .piece rules carry the same specificity and come later in the sheet. */
+  .corner-bar-captured .cap-icon,
+  #captured-panel .cap-icon{
+    --piece-stroke-w:0.4px;
+    --piece-stroke-color:#000;
+    -webkit-text-stroke-width:0.4px !important;
+    -webkit-text-stroke-color:#000 !important;
+  }
   @media (max-width:600px){
     .corner-bar-nick{ font-size:10.5px; }
     .corner-bar-timer{ font-size:10.5px; }
