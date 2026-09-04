@@ -2180,6 +2180,9 @@
           <label for="ptt-mode-toggle-2" id="ptt-mode-label-2" style="cursor:pointer;">🎙️ Режим рации</label>
           <span id="ptt-mode-hint" style="font-size:11px; color:var(--ink-dim); width:100%;">Чтобы говорить — зажмите правую кнопку мыши или кнопку под доской</span>
         </div>
+        <div class="voice-chat-row" id="voice-diag-row" style="display:flex; align-items:center; gap:8px;">
+          <button type="button" class="btn secondary small" id="voice-diag-btn">🩺 Диагностика связи</button>
+        </div>
         <div class="voice-chat-row" id="voice-quality-row" style="display:flex; align-items:center; gap:8px; font-size:12.5px; flex-wrap:wrap;">
           <label for="voice-volume-range" id="voice-volume-label" style="flex:0 0 auto;">🔊 Громкость</label>
           <input type="range" id="voice-volume-range" min="0" max="100" step="5" value="100" style="flex:1; min-width:110px;">
@@ -10244,6 +10247,7 @@
       if(now - (groupVoiceLastRebuild[seat] || 0) < VOICE_REBUILD_COOLDOWN_MS) return;
       groupVoiceLastRebuild[seat] = now;
       vlog('auto-reconnect', onlineSide + '->' + seat, 'was:' + st);
+      appendChatMessage(t('systemLabel'), '\u267B\uFE0F \u0432\u043E\u0441\u0441\u0442\u0430\u043D\u0430\u0432\u043B\u0438\u0432\u0430\u044E \u0433\u043E\u043B\u043E\u0441\u043E\u0432\u0443\u044E \u0441\u0432\u044F\u0437\u044C: ' + seat, true);
       establishGroupVoicePeer(seat);
     });
   }
@@ -10651,6 +10655,38 @@
   // kept so the room lifecycle calls stay in one place
   function startTeamVoiceRequestListener(){ closeTeamVoiceVote(); }
   function stopTeamVoiceRequestListener(){ closeTeamVoiceVote(); }
+
+  // Puts the voice report straight into the game chat. DevTools is a big ask
+  // on a phone and easy to get wrong on a desktop — a filter typed into the
+  // Styles pane instead of the Console shows nothing at all — so the same
+  // information is available without leaving the game.
+  (function initVoiceDiagnostics(){
+    const btn = document.getElementById('voice-diag-btn');
+    if(!btn) return;
+    btn.addEventListener('click', () => {
+      let r;
+      try{ r = window.voiceReport(); }catch(e){ r = null; }
+      if(!r){ appendChatMessage(t('systemLabel'), 'voice: report unavailable', true); return; }
+      const lines = [];
+      lines.push('место: ' + (r.mySeat || '—') +
+                 ' | голос: ' + (r.groupVoiceActive ? 'вкл' : 'выкл') +
+                 ' | только напарники: ' + (r.teammatesOnly ? 'да' : 'нет'));
+      lines.push('должен слышать: ' + (r.shouldHear.length ? r.shouldHear.join(', ') : '—'));
+      const seats = Object.keys(r.peers);
+      if(!seats.length){
+        lines.push('соединений нет');
+      } else {
+        seats.forEach(seat => {
+          const p = r.peers[seat];
+          lines.push(seat + ': ' + p.connection + ' / ICE ' + p.ice +
+                     ' | sid ' + String(p.sid).slice(0, 8) +
+                     ' | звук ' + (p.audio ? 'есть' : 'нет'));
+        });
+      }
+      lines.push('громкость ' + Math.round(r.volume * 100) + '% | качество ' + r.quality);
+      appendChatMessage(t('systemLabel'), lines.join('\n'), true);
+    });
+  })();
 
   (function initVoiceQualityControls(){
     const vol = document.getElementById('voice-volume-range');
