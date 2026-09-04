@@ -9269,6 +9269,7 @@
     };
     pc.onconnectionstatechange = () => {
       const st = pc.connectionState;
+      vlog('connectionState', onlineSide + '->' + otherSeat, st, 'sid=' + (groupVoiceSessionId[otherSeat] || '-'));
       if(st === 'connected'){
         if(directCallReconnectTimer){ clearTimeout(directCallReconnectTimer); directCallReconnectTimer = null; }
         directCallDisconnectedSince = null;
@@ -10163,21 +10164,74 @@
   // rebuilding for a seat that simply never joined would write a fresh offer
   // into the database every few seconds for nothing.
   let groupVoiceWatchdog = null;
+  // Seats we have actually been connected to during this voice session, and
+  // when we last tried to rebuild each. "Ever connected" is what makes the
+  // retry safe to run forever: a partner who has genuinely talked to us is
+  // expected back, while a seat that simply never joined is left alone
+  // instead of being offered a connection every few seconds.
+  var groupVoiceEverConnected = {};
+  var groupVoiceLastRebuild = {};
+  const VOICE_REBUILD_COOLDOWN_MS = 6000;
+
   function startGroupVoiceWatchdog(){
     stopGroupVoiceWatchdog();
     groupVoiceWatchdog = setInterval(() => {
       if(!groupVoiceActive || !onlineRoomId){ stopGroupVoiceWatchdog(); return; }
+      const now = Date.now();
       voicePeerSeats().forEach(seat => {
+        if(!groupVoiceEverConnected[seat]) return;      // never talked to us
         const pc = groupVoicePeerConnections[seat];
-        if(!pc) return;
-        const st = pc.connectionState;
-        if(st === 'failed' || st === 'closed') establishGroupVoicePeer(seat);
+        const st = pc ? pc.connectionState : 'gone';
+        // 'gone' matters as much as 'failed': when the per-peer retry gives
+        // up it DELETES the connection, and the previous version of this
+        // watchdog skipped anything without one — so the very case it was
+        // meant to cover, a partner who left and came back, was the one case
+        // it ignored. That is why the link only ever came back by hand.
+        const dead = (st === 'gone' || st === 'failed' || st === 'closed' || st === 'disconnected');
+        if(!dead) return;
+        if(now - (groupVoiceLastRebuild[seat] || 0) < VOICE_REBUILD_COOLDOWN_MS) return;
+        groupVoiceLastRebuild[seat] = now;
+        vlog('auto-reconnect', onlineSide + '->' + seat, 'was:' + st);
+        establishGroupVoicePeer(seat);
       });
-    }, 5000);
+    }, 3000);
   }
   function stopGroupVoiceWatchdog(){
     if(groupVoiceWatchdog){ clearInterval(groupVoiceWatchdog); groupVoiceWatchdog = null; }
   }
+
+  // Diagnostics for the voice mesh. Every line is prefixed [voice] so it can
+  // be filtered in the console, and voiceReport() prints one copyable block
+  // instead of making anyone hunt through the log.
+  function vlog(){
+    try{ console.log.apply(console, ['[voice]'].concat([].slice.call(arguments))); }catch(e){}
+  }
+  window.voiceReport = function(){
+    const peers = {};
+    Object.keys(groupVoicePeerConnections).forEach(seat => {
+      const pc = groupVoicePeerConnections[seat];
+      peers[seat] = {
+        connection: pc ? pc.connectionState : 'none',
+        ice: pc ? pc.iceConnectionState : 'none',
+        sid: groupVoiceSessionId[seat] || 'none',
+        hasRemote: !!(pc && pc.currentRemoteDescription),
+        audio: !!groupVoiceRemoteAudioEls[seat]
+      };
+    });
+    const report = {
+      mySeat: onlineSide,
+      room: onlineRoomId ? String(onlineRoomId).slice(0, 8) + '…' : null,
+      seatsInRoom: Object.keys(onlinePlayers || {}),
+      shouldHear: (typeof voicePeerSeats === 'function') ? voicePeerSeats() : [],
+      groupVoiceActive: groupVoiceActive,
+      teammatesOnly: teamVoiceOnly,
+      quality: voiceQuality,
+      volume: voiceOutputVolume,
+      peers: peers
+    };
+    console.log('[voice] REPORT\n' + JSON.stringify(report, null, 2));
+    return report;
+  };
 
   function establishGroupVoicePeer(otherSeat){
     if(!groupVoiceActive || !fbDb) return;
@@ -10186,8 +10240,11 @@
     groupVoiceFbRefs[otherSeat] = [];
     if(groupVoicePeerConnections[otherSeat]){ try{ groupVoicePeerConnections[otherSeat].close(); }catch(e){} }
 
+    vlog('building link', onlineSide + '<->' + otherSeat,
+         'I offer:' + (onlineSide < otherSeat));
     const pc = new RTCPeerConnection(RTC_CONFIG);
     groupVoicePeerConnections[otherSeat] = pc;
+    pc.oniceconnectionstatechange = () => vlog('ICE', onlineSide + '->' + otherSeat, pc.iceConnectionState);
     groupVoiceLocalStream.getTracks().forEach(track => pc.addTrack(track, groupVoiceLocalStream));
 
     pc.ontrack = (event) => {
@@ -10213,8 +10270,10 @@
 
     pc.onconnectionstatechange = () => {
       const st = pc.connectionState;
+      vlog('connectionState', onlineSide + '->' + otherSeat, st, 'sid=' + (groupVoiceSessionId[otherSeat] || '-'));
       const statusEl = document.getElementById('voice-chat-status');
       if(st === 'connected'){
+        groupVoiceEverConnected[otherSeat] = true;   // worth retrying forever now
         if(groupVoiceReconnectTimers[otherSeat]){ clearTimeout(groupVoiceReconnectTimers[otherSeat]); delete groupVoiceReconnectTimers[otherSeat]; }
         delete groupVoiceDisconnectedSince[otherSeat];
         if(statusEl) statusEl.textContent = t('voiceChatConnected');
@@ -10279,6 +10338,7 @@
         await pc.setLocalDescription(offer);
         const offerPayload = await encryptVoiceSignal(roomId, JSON.stringify({sid: sid, offer: offer}));
         await fbDb.ref(groupVoicePairPath(otherSeat, 'offer')).set(offerPayload);
+        vlog('offer sent', onlineSide + '->' + otherSeat, 'sid=' + sid);
         const answerRef = fbDb.ref(groupVoicePairPath(otherSeat, 'answer'));
         answerRef.on('value', async (snap) => {
           const raw = snap.val();
@@ -10310,11 +10370,14 @@
               // and we must start over with a fresh connection instead of
               // ignoring them — this is what used to leave the pair mute.
               if(groupVoiceSessionId[otherSeat] === sid) return;
+              vlog('partner rebuilt — renegotiating', otherSeat,
+                   'old sid=' + groupVoiceSessionId[otherSeat], 'new sid=' + sid);
               groupVoiceSessionId[otherSeat] = sid;
               establishGroupVoicePeer(otherSeat);
               return;
             }
             groupVoiceSessionId[otherSeat] = sid;
+            vlog('offer received', otherSeat + '->' + onlineSide, 'sid=' + sid);
             await pc.setRemoteDescription(new RTCSessionDescription(off));
             await flushPendingCandidates();
             const answer = await pc.createAnswer();
@@ -10364,6 +10427,8 @@
     groupVoiceDisconnectedSince = {};
     groupVoiceFbRefs = {};
     stopGroupVoiceWatchdog();
+    groupVoiceEverConnected = {};
+    groupVoiceLastRebuild = {};
     // withdraw my "come and talk" ring so nobody is called by a stale one
     clearVoiceInvite();
   }
