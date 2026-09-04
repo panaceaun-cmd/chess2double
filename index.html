@@ -207,7 +207,7 @@
 
   /* drag-and-drop panels */
   .drag-handle{
-    position:absolute; top:6px; right:6px; z-index:6;
+    position:absolute; top:6px; left:6px; z-index:6;
     width:24px; height:24px; border-radius:6px;
     display:flex; align-items:center; justify-content:center;
     background:rgba(0,0,0,.35); border:1px solid var(--brass-dim);
@@ -217,7 +217,7 @@
   .drag-handle:active{ cursor:grabbing; background:rgba(201,162,75,.35); }
   @media (max-width:1023px){
     /* tablets and phones are touch-first — make the handle easy to hit */
-    .drag-handle{ width:34px; height:34px; font-size:17px; top:4px; right:4px; }
+    .drag-handle{ width:34px; height:34px; font-size:17px; top:4px; left:4px; }
   }
   .panel-floating{
     position:absolute !important;
@@ -230,6 +230,45 @@
   .drag-placeholder{ visibility:hidden; pointer-events:none; }
   .panel-lifting{ transition: left .22s ease, top .22s ease; }
   body.panels-locked .drag-handle{ display:none; }
+
+  /* ---- phone performance ----
+     Every piece carries drop-shadow filters, and in 3D each one also sits in
+     a transformed, preserve-3d context. That is 64 separately filtered
+     composited layers, which is what makes the board feel sticky and the
+     move animation stutter on a phone. Desktop GPUs shrug it off; phones do
+     not. Below 1024px the shadows come off the pieces and a single cheap
+     shadow under the board stands in for the depth cue. Geometry, colours
+     and outlines are untouched — only the filters go. */
+  @media (max-width:1023px){
+    #board .piece,
+    #board .piece.piece3d,
+    #board .piece.piece-vec,
+    #board.board3d .piece{ filter:none !important; }
+    #board.board3d{ box-shadow:0 18px 26px rgba(0,0,0,.45); }
+    /* the moving piece is the one frame that matters — keep it cheap */
+    #board .piece{ backface-visibility:hidden; }
+  }
+
+  /* Close button: same look as the drag handle, mirrored to the right edge.
+     Present on every panel and every modal, so there is always one obvious
+     way out of whatever is on screen. Unlike the drag handle it stays visible
+     when panels are locked — locking is about not moving things by accident,
+     not about being unable to close them. */
+  .panel-close{
+    position:absolute; top:6px; right:6px; z-index:7;
+    width:24px; height:24px; border-radius:6px;
+    display:flex; align-items:center; justify-content:center;
+    background:rgba(0,0,0,.35); border:1px solid var(--brass-dim);
+    color:var(--brass); font-size:14px; line-height:1; cursor:pointer;
+    padding:0; font-family:inherit; font-weight:700;
+  }
+  .panel-close:hover{ background:rgba(201,162,75,.35); color:#fff; }
+  .panel-close:active{ transform:translateY(1px); }
+  @media (max-width:1023px){
+    .panel-close{ width:34px; height:34px; font-size:18px; top:4px; right:4px; }
+  }
+  /* modal cards need room for the button and their own positioning context */
+  .modal-overlay > *{ position:relative; }
   #reset-layout-btn{ width:100%; }
 
   #settings-panel, #history-panel, #record-panel, #timers-panel, #captured-panel, #local-players-panel, #rules-panel{
@@ -2881,8 +2920,21 @@
   let openingChatMsgEl = null;
   function pushHistoryLog(text){
     moveLog.push(text);
+    renderHistoryLog();
+  }
+  // taking a move back also removes it from the move list — leaving it there
+  // contradicted the board and the banner above it
+  function popHistoryLog(){
+    moveLog.pop();
+    renderHistoryLog();
+  }
+  function renderHistoryLog(){
     const log = document.getElementById('history-log');
     if(!log) return;
+    if(moveLog.length === 0){
+      log.innerHTML = '<div class="no-players">' + escapeHtml(t('noMovesYet')) + '</div>';
+      return;
+    }
     log.innerHTML = moveLog.map((t,i)=>
       '<div class="hist-row"><span class="hist-n">' + (i+1) + '.</span><span>' + escapeHtml(t) + '</span></div>'
     ).join('');
@@ -3587,7 +3639,7 @@
     // reaches them — but only for THIS colour. Dropping the cached sprites is
     // what makes the change show up; nothing is written back into the shared
     // control, or one colour's change would land on all four again.
-    try{ invalidatePiece3D(); }catch(e){}
+    try{ invalidateOutlineCache(); invalidatePiece3D(); }catch(e){}
     const label = document.getElementById('ol-value-' + colorKey);
     if(label) label.textContent = px + 'px';
     const range = document.getElementById('piece-outline-width-' + colorKey);
@@ -3600,7 +3652,7 @@
   function applyOutlineColor(colorKey, hex, save){
     document.documentElement.style.setProperty('--piece-stroke-color-' + CSSCOLOR[colorKey], hex);
     // same as applyOutlineWidth(): per colour, and only this colour
-    try{ invalidatePiece3D(); }catch(e){}
+    try{ invalidateOutlineCache(); invalidatePiece3D(); }catch(e){}
     const input = document.getElementById('piece-outline-color-' + colorKey);
     if(input) input.value = hex;
     if(save){ try{ localStorage.setItem('chess2-outline-color-' + colorKey, hex); }catch(e){} }
@@ -4753,7 +4805,15 @@
   // which is why changing one colour's outline changed all four.
   // The glyph sliders run 0–3px; the sprite/model outline expects 0–8, hence
   // the scaling.
+  // Memoised: this used to run getComputedStyle() once per piece, i.e. 64
+  // forced style recalculations on every single render. On a phone that was
+  // the single biggest cost of redrawing the board. The values only change
+  // when the outline controls move, which clears the cache.
+  let outlineCache = {};
+  function invalidateOutlineCache(){ outlineCache = {}; }
   function outlineForColor(colorKey){
+    const hit = outlineCache[colorKey];
+    if(hit) return hit;
     const css = CSSCOLOR[colorKey];
     let raw = '', hex = '';
     try{
@@ -4762,10 +4822,12 @@
       hex = (cs.getPropertyValue('--piece-stroke-color-' + css) || '').trim();
     }catch(e){}
     const px = parseFloat(raw);
-    return {
+    const res = {
       px: isFinite(px) ? Math.max(0, Math.min(8, (px / 3) * 8)) : outline3dWidth,
       color: hex || outline3dColor
     };
+    outlineCache[colorKey] = res;
+    return res;
   }
   // Contrast for the Marble/Wood/Plastic/Rust image-pack recolour (the
   // shadow → base → highlight blend and the cylindrical side-shading) —
@@ -5201,6 +5263,7 @@
   // had actually customised something.
   function invalidatePiece3D(){
     try{
+      outlineCache = {};
       piece3dCache = {};
       pieceVecCache = {};
       piecePackTintCache = {};
@@ -7917,6 +7980,10 @@
     } else if(JSON.stringify(room.board) !== JSON.stringify(board)){
       // a real move landed — remember where we were so it can be taken back
       history.push(snapshotState());
+      // and start this turn's move clock from zero. It used to keep running
+      // from the previous turn, so on the other players' screens the limit
+      // expired early and skipped a turn that was not actually over.
+      resetMoveClock();
     }
     onlineUndoSeq = remoteUndoSeq;
     board = room.board;
@@ -10273,6 +10340,12 @@
       }
     }
     if(moveLimitSec > 0 && moveElapsedSec >= moveLimitSec){
+      // Online: only the player whose turn it actually is forfeits it. Every
+      // client runs this tick, so previously they ALL called it at once and
+      // the turn jumped several places, leaving each screen showing a
+      // different player from the one the board was really waiting on. The
+      // others simply pick up the result from the room.
+      if(onlineRoomId && onlineSide && onlineSeatForColor(turn) !== onlineSide) return;
       onMoveLimitReached();
     }
   }
@@ -11423,42 +11496,75 @@
       }
     }
 
-    boardEl.innerHTML='';
-    boardEl.dataset.theme = boardTheme;
     // Online: each player always sees their own pieces on the near ranks,
     // regardless of which of the 4 colors they currently control — this
     // overrides the local orientationMode setting, which only makes sense
     // for offline hotseat play where everyone shares one screen.
     const flipBoard = isBoardCurrentlyFlipped();
+    // GRID REUSE. Rebuilding all 192 cells and their listeners on every
+    // redraw cost ~300ms on a phone — one visible stall per move, and a
+    // sticky feel on every tap. The grid itself only changes when the board
+    // is flipped, resized or re-themed; the rest of the time the same square
+    // elements are emptied and refilled, which skips creating 128 divs, 18
+    // coordinate cells and the whole teardown.
+    const gridSig = flipBoard + '|' + boardTheme + '|' + ROWS + 'x' + COLS;
+    const cachedSqs = boardEl.__sqCache;
+    const reuseGrid = boardEl.dataset.gridSig === gridSig && cachedSqs &&
+                      cachedSqs.length === ROWS * COLS && cachedSqs[0].parentNode === boardEl;
+    if(!reuseGrid){
+      boardEl.innerHTML = '';
+      boardEl.__sqCache = new Array(ROWS * COLS);
+      boardEl.dataset.gridSig = gridSig;
+    } else {
+      for(let i = 0; i < cachedSqs.length; i++){
+        const sq = cachedSqs[i];
+        sq.className = sq.dataset.baseClass;
+        while(sq.firstChild) sq.removeChild(sq.firstChild);
+      }
+    }
+    bindBoardClicks();
+    boardEl.dataset.theme = boardTheme;
     boardEl.classList.toggle('flip180', flipBoard);
     syncBoardTiltVars();   // flipping inverts the stand-up angle
     const FILES = 'ABCDEFGHIJKLMNOP';
 
     // top row: corner + 16 file letters + corner
-    const topCorner = document.createElement('div');
-    topCorner.className = 'coord-cell coord-corner';
-    boardEl.appendChild(topCorner);
-    for(let c=0;c<COLS;c++){
-      const fCell = document.createElement('div');
-      fCell.className = 'coord-cell' + (flipBoard?' flip-counter':'');
-      fCell.textContent = FILES[c];
-      boardEl.appendChild(fCell);
+    if(!reuseGrid){
+      const topCorner = document.createElement('div');
+      topCorner.className = 'coord-cell coord-corner';
+      boardEl.appendChild(topCorner);
+      for(let c=0;c<COLS;c++){
+        const fCell = document.createElement('div');
+        fCell.className = 'coord-cell' + (flipBoard?' flip-counter':'');
+        fCell.textContent = FILES[c];
+        boardEl.appendChild(fCell);
+      }
+      const topCorner2 = document.createElement('div');
+      topCorner2.className = 'coord-cell coord-corner';
+      boardEl.appendChild(topCorner2);
     }
-    const topCorner2 = document.createElement('div');
-    topCorner2.className = 'coord-cell coord-corner';
-    boardEl.appendChild(topCorner2);
 
     for(let r=0;r<ROWS;r++){
-      const rankCellL = document.createElement('div');
-      rankCellL.className = 'coord-cell' + (flipBoard?' flip-counter':'');
-      rankCellL.textContent = String(ROWS-r);
-      boardEl.appendChild(rankCellL);
+      if(!reuseGrid){
+        const rankCellL = document.createElement('div');
+        rankCellL.className = 'coord-cell' + (flipBoard?' flip-counter':'');
+        rankCellL.textContent = String(ROWS-r);
+        boardEl.appendChild(rankCellL);
+      }
 
       for(let c=0;c<COLS;c++){
-        const sq = document.createElement('div');
         const isLight = (r+c)%2===0;
-        sq.className = 'sq ' + (isLight?'light':'dark');
-        sq.dataset.r=r; sq.dataset.c=c;
+        const sqIdx = r*COLS + c;
+        let sq;
+        if(reuseGrid){
+          sq = boardEl.__sqCache[sqIdx];      // already emptied and reset above
+        } else {
+          sq = document.createElement('div');
+          sq.dataset.baseClass = 'sq ' + (isLight?'light':'dark');
+          sq.className = sq.dataset.baseClass;
+          sq.dataset.r=r; sq.dataset.c=c;
+          boardEl.__sqCache[sqIdx] = sq;
+        }
 
         if(lastMove && lastMove.from.r===r && lastMove.from.c===c){
           sq.classList.add('lastmove-from');
@@ -11530,28 +11636,32 @@
           sq.appendChild(marker);
         }
 
-        sq.addEventListener('click', onSquareClick);
-        boardEl.appendChild(sq);
+        // click handling is delegated from #board — see bindBoardClicks()
+        if(!reuseGrid) boardEl.appendChild(sq);
       }
 
-      const rankCellR = document.createElement('div');
-      rankCellR.className = 'coord-cell' + (flipBoard?' flip-counter':'');
-      rankCellR.textContent = String(ROWS-r);
-      boardEl.appendChild(rankCellR);
+      if(!reuseGrid){
+        const rankCellR = document.createElement('div');
+        rankCellR.className = 'coord-cell' + (flipBoard?' flip-counter':'');
+        rankCellR.textContent = String(ROWS-r);
+        boardEl.appendChild(rankCellR);
+      }
     }
 
-    const corner = document.createElement('div');
-    corner.className = 'coord-cell coord-corner';
-    boardEl.appendChild(corner);
-    for(let c=0;c<COLS;c++){
-      const fCell = document.createElement('div');
-      fCell.className = 'coord-cell' + (flipBoard?' flip-counter':'');
-      fCell.textContent = FILES[c];
-      boardEl.appendChild(fCell);
+    if(!reuseGrid){
+      const corner = document.createElement('div');
+      corner.className = 'coord-cell coord-corner';
+      boardEl.appendChild(corner);
+      for(let c=0;c<COLS;c++){
+        const fCell = document.createElement('div');
+        fCell.className = 'coord-cell' + (flipBoard?' flip-counter':'');
+        fCell.textContent = FILES[c];
+        boardEl.appendChild(fCell);
+      }
+      const corner2 = document.createElement('div');
+      corner2.className = 'coord-cell coord-corner';
+      boardEl.appendChild(corner2);
     }
-    const corner2 = document.createElement('div');
-    corner2.className = 'coord-cell coord-corner';
-    boardEl.appendChild(corner2);
 
     if(isNewMove){
       lastAnimatedMoveRef = lastMove;
@@ -11941,7 +12051,11 @@
       board: JSON.parse(JSON.stringify(board)),
       turnIndex,
       enPassant: enPassant ? {...enPassant} : null,
-      lastMove: lastMove ? {from:{...lastMove.from}, to:{...lastMove.to}} : null,
+      // Full copy, not just from/to. describeLastMove() also needs color,
+      // piece, capture and promotion — dropping them made the line above the
+      // board read "Игрок undefined (undefined): undefined A2 → A3" once an
+      // undo restored an earlier move from this snapshot.
+      lastMove: lastMove ? JSON.parse(JSON.stringify(lastMove)) : null,
       gameOver,
       capturedFrom: JSON.parse(JSON.stringify(capturedFrom)),
       eliminatedColors: new Set(eliminatedColors),
@@ -12005,6 +12119,20 @@
     if(!refreshSelectionHighlights()) render();
   }
 
+  // Delegated from #board, so a click is resolved by walking up from the
+  // target instead of every square carrying its own listener. render()
+  // rebuilds the grid, so the old way attached 128 fresh listeners on every
+  // single redraw.
+  function bindBoardClicks(){
+    const boardEl = document.getElementById('board');
+    if(!boardEl || boardEl.dataset.clicksBound === '1') return;
+    boardEl.dataset.clicksBound = '1';
+    boardEl.addEventListener('click', (e) => {
+      const sq = e.target && e.target.closest ? e.target.closest('.sq') : null;
+      if(!sq || !boardEl.contains(sq)) return;
+      onSquareClick({ currentTarget: sq });
+    });
+  }
   function onSquareClick(e){
     if(gameOver) return;
     if(isPaused) return;
@@ -12923,9 +13051,72 @@
       try{ await fbDb.ref(undoPath()).remove(); }catch(e){}
     }
   });
+  // ---- reverse animation for an undo ----
+  // The forward animation is woven into render() and keyed on lastMove, so
+  // rather than teach it to run backwards this plays a detached copy of the
+  // piece sliding from the square it moved TO back to the square it came
+  // FROM, at the same 2 squares/second. The real piece is hidden for the
+  // duration and revealed at the end, so there is no double image.
+  function captureUndoVisual(){
+    const mv = lastMove;
+    if(!mv || !mv.from || !mv.to) return null;
+    const boardEl = document.getElementById('board');
+    if(!boardEl) return null;
+    const toSq = boardEl.querySelector('.sq[data-r="' + mv.to.r + '"][data-c="' + mv.to.c + '"]');
+    const pieceEl = toSq ? toSq.querySelector('.piece') : null;
+    if(!pieceEl) return null;
+    const rect = pieceEl.getBoundingClientRect();
+    if(!rect.width || !rect.height) return null;
+    return { html: pieceEl.outerHTML, rect,
+             from: {r: mv.from.r, c: mv.from.c}, to: {r: mv.to.r, c: mv.to.c} };
+  }
+  function playUndoVisual(cap){
+    if(!cap) return;
+    const boardEl = document.getElementById('board');
+    if(!boardEl) return;
+    const destSq = boardEl.querySelector('.sq[data-r="' + cap.from.r + '"][data-c="' + cap.from.c + '"]');
+    const destPiece = destSq ? destSq.querySelector('.piece') : null;
+    if(!destPiece) return;
+    const destRect = destPiece.getBoundingClientRect();
+    if(!destRect.width || !destRect.height) return;
+    const wrap = document.createElement('div');
+    wrap.innerHTML = cap.html;
+    const ghost = wrap.firstElementChild;
+    if(!ghost) return;
+    // fixed to the viewport, so the board's own 3D tilt / 180° flip doesn't
+    // have to be recomputed — both rects are already measured on screen
+    ghost.style.position = 'fixed';
+    ghost.style.left = cap.rect.left + 'px';
+    ghost.style.top = cap.rect.top + 'px';
+    ghost.style.width = cap.rect.width + 'px';
+    ghost.style.height = cap.rect.height + 'px';
+    ghost.style.margin = '0';
+    ghost.style.zIndex = '60';
+    ghost.style.pointerEvents = 'none';
+    document.body.appendChild(ghost);
+    const dist = Math.hypot(cap.to.r - cap.from.r, cap.to.c - cap.from.c);
+    const ms = Math.max(90, (dist / 2) * 1000);
+    const prevVis = destPiece.style.visibility;
+    destPiece.style.visibility = 'hidden';
+    const done = () => {
+      if(ghost.parentNode) ghost.parentNode.removeChild(ghost);
+      destPiece.style.visibility = prevVis || '';
+    };
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        ghost.style.transition = 'left ' + ms + 'ms ease, top ' + ms + 'ms ease';
+        ghost.style.left = destRect.left + 'px';
+        ghost.style.top = destRect.top + 'px';
+      });
+    });
+    setTimeout(done, ms + 90);
+  }
+
   function performLocalUndo(){
     const prev = history.pop();
     if(!prev) return;
+    // measured before anything changes — the piece is still on its destination
+    const undoVisual = captureUndoVisual();
     board = prev.board;
     turnIndex = prev.turnIndex;
     turn = TURN_ORDER[turnIndex];
@@ -12936,12 +13127,31 @@
     eliminatedColors = prev.eliminatedColors || new Set();
     takenOverBy = prev.takenOverBy || {};
     pendingFightOn = null;
+    // Restart the per-move clock. Without this it carried on from wherever it
+    // was before the undo, so it could hit the limit a moment later and skip
+    // the turn on its own — the banner then showed one player while the board
+    // had already moved on to the next.
+    resetMoveClock();
     renderCapturedPanel();
     selected = null; legalMoves = [];
     document.getElementById('overlay').classList.remove('show');
-    appendChatMessage(t('systemLabel'), t('undoneMsgPrefix') + ' ' + colorLabel(turn) + '.', true);
-    if(document.getElementById('voice-toggle').checked) speak(t('undoneMsgPrefix') + ' ' + colorLabel(turn) + '.');
+    const undoneMsg = t('undoneMsgPrefix') + ' ' + colorLabel(turn) + '.';
+    appendChatMessage(t('systemLabel'), undoneMsg, true);
+    if(document.getElementById('voice-toggle').checked) speak(undoneMsg);
+    // The strip above the board is written by announceLastMove() and was never
+    // touched by an undo, so it kept describing the move that had just been
+    // taken back — "next turn" and all. That is the line that disagreed with
+    // the board. Rewrite it for the position we have actually returned to.
+    const nextTxt = gameOver ? '' : (t('nextTurnWord') + ': ' + colorLabel(turn));
+    const mainTxt = describeLastMove() || undoneMsg;
+    showMoveToast(mainTxt, nextTxt);
+    updateTicker(mainTxt, nextTxt);
+    popHistoryLog();
     render();
+    // The restored lastMove is a fresh object, so render() would otherwise
+    // treat the PREVIOUS move as brand new and animate it forwards again.
+    lastAnimatedMoveRef = lastMove;
+    playUndoVisual(undoVisual);
     updateStatus();
     renderTimers();
     if(onlineRoomId){
@@ -13136,6 +13346,51 @@
     return [Math.min(Math.max(0, pageLeft), maxLeft), Math.max(minTop, pageTop)];
   }
 
+  // One close button for everything on screen: panels and modals alike.
+  // For a panel it hides it exactly as its under-board toggle does (so the
+  // button's highlight and the saved layout stay in step). For a modal it
+  // prefers the dialog's own Cancel/Close control, because several of them
+  // have to do more than hide — withdrawing an undo request, clearing a
+  // pending vote — and silently removing the overlay would leave the other
+  // players waiting on an answer that is never coming.
+  const NO_CLOSE_PANELS = ['board-wrap'];
+  function addCloseButton(el, onClose){
+    if(!el || el.querySelector(':scope > .panel-close')) return null;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'panel-close';
+    btn.innerHTML = '✕';
+    btn.setAttribute('aria-label', 'Close');
+    btn.title = 'Закрыть';
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if(typeof onClose === 'function'){ onClose(); return; }
+      closePanelById(el.id);
+    });
+    // The button is absolutely positioned, so it anchors to the nearest
+    // POSITIONED ancestor. A card left at position:static handed it to the
+    // full-screen backdrop instead, which is how it ended up in the corner of
+    // the window rather than in the corner of the dialog.
+    try{
+      if(getComputedStyle(el).position === 'static') el.style.position = 'relative';
+    }catch(e){ el.style.position = 'relative'; }
+    el.appendChild(btn);
+    return btn;
+  }
+  function closePanelById(panelId){
+    if(!panelId) return;
+    if(typeof ubcPanelState === 'object' && panelId in ubcPanelState){
+      ubcPanelState[panelId] = false;
+      try{ localStorage.setItem(UBC_PANEL_STATE_KEY, JSON.stringify(ubcPanelState)); }catch(e){}
+      applyUbcPanelVisibility(panelId);
+      document.querySelectorAll('.ubc-btn[data-toggle]').forEach(refreshUbcButtonState);
+      return;
+    }
+    const panel = document.getElementById(panelId);
+    if(panel) panel.style.display = 'none';
+  }
+
   function makeElementDraggable(el){
     if(!el || !el.id || el.querySelector(':scope > .drag-handle')) return;
     const handle = document.createElement('div');
@@ -13143,6 +13398,9 @@
     handle.innerHTML = '✥';
     handle.title = 'Перетащить';
     el.appendChild(handle);
+    // The board frame is the game itself — there is nothing sensible for a
+    // close button to do there, so it only gets the drag handle.
+    if(NO_CLOSE_PANELS.indexOf(el.id) === -1) addCloseButton(el);
 
     let dragging = false, pendingDrag = false, offsetX = 0, offsetY = 0;
     let downPageX = 0, downPageY = 0, pendingPageLeft = 0, pendingPageTop = 0;
@@ -13361,6 +13619,85 @@
     try{ localStorage.removeItem(PANEL_POS_KEY); }catch(e){}
     location.reload();
   });
+
+  // ---- close buttons on every dialog ----
+  // Each entry names the dialog's own cancel/close control. Clicking the ✕
+  // clicks THAT, rather than just hiding the overlay, because several of
+  // these dialogs have to undo something on the way out — withdraw an undo
+  // request, drop a pending vote, tell the other players the call is off.
+  // Hiding the overlay alone would leave the rest of the table waiting.
+  const MODAL_CLOSE_ACTIONS = {
+    'undo-modal':            'undo-cancel',
+    'swap-modal':            'swap-decline-btn',
+    'timer-modal':           'timer-cancel',
+    'movelimit-modal':       'movelimit-cancel',
+    'teamvoice-modal':       'teamvoice-cancel',
+    'incoming-call-modal':   'decline-call-btn',
+    'invite-modal':          'invite-decline',
+    'stats-modal':           'stats-close',
+    'saved-games-modal':     'saved-games-close',
+    'rules-modal':           'rules-close',
+    'skip-turn-info-modal':  'skip-turn-info-close',
+    'resume-game-modal':     'resume-game-no',
+    'waiting-banner':        'waiting-cancel',
+    'overlay':               'overlay-close',
+    'direct-call-bar':       'direct-call-hangup-btn',
+    'settings-modal':        null,   // no cancel of its own — just hide it
+    'record-modal':          null
+  };
+  // Dialogs a player must answer rather than dismiss: picking a language and
+  // choosing a nickname are what the rest of the app is waiting on, and the
+  // splash closes itself. Giving these a ✕ would strand the player on an
+  // empty board with no way back.
+  // 'promo' is the promotion picker: a pawn that reached the last rank MUST
+  // become something, so dismissing it would leave the game in a state with
+  // no legal way forward. The rest are what the app is waiting on — closing
+  // them would strand the player rather than free them.
+  const MODAL_NO_CLOSE = ['lang-gate-modal', 'nick-modal', 'splash-modal',
+                          'disconnect-notice-banner', 'consent-modal', 'promo'];
+
+  function hideModalEl(el){
+    el.classList.remove('show');
+    if(getComputedStyle(el).display !== 'none' && el.style.display !== 'none') el.style.display = 'none';
+  }
+  function attachModalCloseButtons(){
+    document.querySelectorAll('div[id]').forEach(el => {
+      const id = el.id;
+      if(MODAL_NO_CLOSE.indexOf(id) !== -1) return;
+      const cs = getComputedStyle(el);
+      const isModal = el.classList.contains('modal-overlay') ||
+        (cs.position === 'fixed' && parseInt(cs.zIndex || 0) >= 40 && el.children.length > 0);
+      if(!isModal) return;
+      // Put the ✕ on the dialog's card, not on the full-screen backdrop, so
+      // it sits in the dialog's own top-right corner rather than in the far
+      // corner of the screen. "The card" means the single real block child;
+      // decorations we added ourselves don't count.
+      // Structure, NOT measurements: this pass also runs while a dialog is
+      // still hidden, and a hidden element measures zero — which is exactly
+      // why the settings card was skipped and the button landed on the
+      // full-screen backdrop instead.
+      const kids = [...el.children].filter(k =>
+        k.nodeType === 1 && k.tagName !== 'SPAN' && k.tagName !== 'BR' &&
+        !k.classList.contains('panel-close') && !k.classList.contains('drag-handle'));
+      const card = kids.length === 1 ? kids[0] : el;
+      if(card !== el){
+        // an earlier pass may have parked one on the backdrop — move it in
+        const stray = el.querySelector(':scope > .panel-close');
+        if(stray) stray.remove();
+      }
+      if(card.querySelector(':scope > .panel-close')) return;
+      const actionId = Object.prototype.hasOwnProperty.call(MODAL_CLOSE_ACTIONS, id)
+        ? MODAL_CLOSE_ACTIONS[id] : null;
+      addCloseButton(card, () => {
+        const own = actionId && document.getElementById(actionId);
+        if(own){ own.click(); }
+        else { hideModalEl(el); }
+      });
+    });
+  }
+  attachModalCloseButtons();
+  // dialogs built later (or re-rendered) get one as soon as they appear
+  setInterval(attachModalCloseButtons, 1500);
 
   const PANELS_LOCKED_KEY = 'chess2-panels-locked';
   // Locked by default: blocks should not slide around under a stray drag.
