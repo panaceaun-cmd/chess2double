@@ -8176,7 +8176,8 @@
       // Somebody pressed "Leave game". End it here and now for everyone, so
       // every player is immediately free to accept a new invitation instead
       // of sitting in a match that cannot continue.
-      if(room.left && room.left.nick && room.left.nick !== myNick && onlineRoomId){
+      if(room.left && room.left.nick && room.left.nick !== myNick && onlineRoomId
+         && room.left.ts && (Date.now() - room.left.ts) < 60000){
         appendSystemToast(room.left.nick + ' ' + t('playerLeftMsg'));
         document.getElementById('online-game-bar').classList.remove('show');
         leaveOnlineGame(false);
@@ -8215,6 +8216,11 @@
       if(!raw) return;
       let data; try{ data = JSON.parse(raw); }catch(e){ return; }
       if(data.nick === myNick) return; // my own leave notice echoing back — ignore
+      // 'room-left/<roomId>' is never deleted, and a rematch reuses the same
+      // room id, so a record left over from an earlier game would fire the
+      // moment this listener attaches and throw everyone out of a game that
+      // has only just started. Only a fresh notice counts.
+      if(!data.ts || (Date.now() - data.ts) > 60000) return;
       const leftNick = data.nick;
       document.getElementById('online-game-bar').classList.remove('show');
       appendSystemToast(leftNick + ' ' + t('playerLeftMsg'));
@@ -8662,7 +8668,7 @@
       '<div class="ogb-row">' + escapeHtml(t('youArePrefix')) + ' <b>' + escapeHtml(myColors) + '</b></div>' +
       '<div id="online-game-bar-actions"><button class="btn secondary small" id="leave-online-btn">' + escapeHtml(t('leaveBtn')) + '</button></div>';
 
-    document.getElementById('leave-online-btn').addEventListener('click', () => offerSaveBeforeLeaving(() => leaveOnlineGame()));
+    document.getElementById('leave-online-btn').addEventListener('click', () => { announceILeft(); offerSaveBeforeLeaving(() => leaveOnlineGame(false)); });
     bar.querySelectorAll('.ogb-swap-color').forEach(btn => {
       btn.addEventListener('click', () => proposeSwap(btn.dataset.seat));
     });
@@ -8854,27 +8860,34 @@
     render(); updateStatus(); updateOnlineBar(); renderTimers();
   }
 
+  // Tells the other players that this seat is gone. Kept separate from
+  // leaveOnlineGame so it can be sent the moment the button is pressed,
+  // rather than after this player has finished answering "save the game?" —
+  // that dialog used to hold everyone else in a match nobody could continue.
+  // The notice goes out twice on purpose: 'room-left' is its own top-level
+  // branch, while the room record is the path we know reaches every client
+  // because the board travels through it.
+  let leftAnnouncedFor = null;
+  function announceILeft(){
+    if(!fbDb || !onlineRoomId || !myNick) return;
+    if(leftAnnouncedFor === onlineRoomId) return; // already told them
+    leftAnnouncedFor = onlineRoomId;
+    const leftRoom = onlineRoomId, leftNick = myNick;
+    try{ fbDb.ref('room-left/' + leftRoom).set(JSON.stringify({nick: leftNick, ts: Date.now()})); }catch(e){}
+    (async () => {
+      try{
+        const raw = await storeGet('room:' + leftRoom, true);
+        if(!raw) return;
+        const room = JSON.parse(raw);
+        room.left = { nick: leftNick, ts: Date.now() };
+        await storeSet('room:' + leftRoom, JSON.stringify(room), true);
+      }catch(e){}
+    })();
+  }
+
   function leaveOnlineGame(notifyOther){
     hideDisconnectNotice();
-    if(notifyOther !== false && fbDb && onlineRoomId && myNick){
-      // Belt and braces. 'room-left' is a top-level branch of its own: if it
-      // is not spelled out in the Firebase rules the write is rejected in
-      // silence and nobody ever learns that this player left, which is
-      // exactly the "game hangs for everyone else" symptom. The room record
-      // is the one path we know reaches every client, because the board
-      // travels through it, so the notice goes there as well.
-      const leftRoom = onlineRoomId, leftNick = myNick;
-      try{ fbDb.ref('room-left/' + leftRoom).set(JSON.stringify({nick: leftNick, ts: Date.now()})); }catch(e){}
-      (async () => {
-        try{
-          const raw = await storeGet('room:' + leftRoom, true);
-          if(!raw) return;
-          const room = JSON.parse(raw);
-          room.left = { nick: leftNick, ts: Date.now() };
-          await storeSet('room:' + leftRoom, JSON.stringify(room), true);
-        }catch(e){}
-      })();
-    }
+    if(notifyOther !== false) announceILeft();
     stopRoomLeftListener();
     stopGroupVoiceInviteListener();
     roomPieceColors = {}; roomColorNames = {}; roomOutlineStyle = {};
@@ -11699,6 +11712,10 @@
     });
   }
   async function performOnlineRematch(){
+    // Same room id as the game that just ended, so anything left over from it
+    // has to go — otherwise the old "player X left" record fires again here.
+    leftAnnouncedFor = null;
+    if(fbDb && onlineRoomId){ try{ fbDb.ref('room-left/' + onlineRoomId).remove(); }catch(e){} }
     board = initBoard();
     turnIndex = 0;
     turn = TURN_ORDER[turnIndex];
