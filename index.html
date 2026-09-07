@@ -8173,6 +8173,15 @@
       const raw = snap.val();
       if(!raw) return;
       let room; try{ room = JSON.parse(raw); }catch(e){ return; }
+      // Somebody pressed "Leave game". End it here and now for everyone, so
+      // every player is immediately free to accept a new invitation instead
+      // of sitting in a match that cannot continue.
+      if(room.left && room.left.nick && room.left.nick !== myNick && onlineRoomId){
+        appendSystemToast(room.left.nick + ' ' + t('playerLeftMsg'));
+        document.getElementById('online-game-bar').classList.remove('show');
+        leaveOnlineGame(false);
+        return;
+      }
       // Someone could not rebuild the board from a diff. Anyone whose own
       // board is up to date answers with a full one; the next payload has no
       // resyncReq in it, which is what stops this repeating.
@@ -8209,9 +8218,9 @@
       const leftNick = data.nick;
       document.getElementById('online-game-bar').classList.remove('show');
       appendSystemToast(leftNick + ' ' + t('playerLeftMsg'));
-      setTimeout(() => {
-        if(onlineRoomId) leaveOnlineGame(false);
-      }, 3000);
+      // No delay: the match cannot continue, and every second here is a
+      // second the remaining players cannot accept a new invitation.
+      if(onlineRoomId) leaveOnlineGame(false);
     });
   }
   function stopRoomLeftListener(){
@@ -8848,7 +8857,23 @@
   function leaveOnlineGame(notifyOther){
     hideDisconnectNotice();
     if(notifyOther !== false && fbDb && onlineRoomId && myNick){
-      try{ fbDb.ref('room-left/' + onlineRoomId).set(JSON.stringify({nick: myNick, ts: Date.now()})); }catch(e){}
+      // Belt and braces. 'room-left' is a top-level branch of its own: if it
+      // is not spelled out in the Firebase rules the write is rejected in
+      // silence and nobody ever learns that this player left, which is
+      // exactly the "game hangs for everyone else" symptom. The room record
+      // is the one path we know reaches every client, because the board
+      // travels through it, so the notice goes there as well.
+      const leftRoom = onlineRoomId, leftNick = myNick;
+      try{ fbDb.ref('room-left/' + leftRoom).set(JSON.stringify({nick: leftNick, ts: Date.now()})); }catch(e){}
+      (async () => {
+        try{
+          const raw = await storeGet('room:' + leftRoom, true);
+          if(!raw) return;
+          const room = JSON.parse(raw);
+          room.left = { nick: leftNick, ts: Date.now() };
+          await storeSet('room:' + leftRoom, JSON.stringify(room), true);
+        }catch(e){}
+      })();
     }
     stopRoomLeftListener();
     stopGroupVoiceInviteListener();
