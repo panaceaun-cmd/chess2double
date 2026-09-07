@@ -1,9 +1,11 @@
 // CHESS 2 DOUBLE — offline cache for PWA / TWA (Android app) installability.
 //
-// Bump this string on every deploy. It is what makes activate() throw away the
-// previous cache; while the name stayed 'chess2double-v1' forever, the old
-// cache was never cleared and returning players kept getting an old build.
-const CACHE_NAME = 'chess2double-2026-09-03';
+// Bump this string on every deploy. activate() throws away every cache that is
+// not this one, so a stale icon or manifest never outlives a release.
+// Note: the PAGE itself no longer depends on this being bumped — index.html is
+// revalidated against the server on every launch (see the fetch handler), so
+// forgetting to bump delays only the static assets, never the game.
+const CACHE_NAME = 'chess2double-2026-09-07';
 
 // './index.html' — NOT './chess-double.html', which no longer exists in the
 // repository. cache.addAll() is atomic, so that one dead path made the whole
@@ -25,15 +27,26 @@ self.addEventListener('install', (event) => {
     await Promise.all(CORE_ASSETS.map((url) =>
       cache.add(url).catch((err) => console.warn('[sw] not precached:', url, err && err.message))
     ));
-    await self.skipWaiting();
+    // No unconditional skipWaiting() here on purpose. index.html decides when
+    // it is safe to hand over — it only asks when the tab has no controller
+    // yet, i.e. nothing is at risk. Taking over on our own defeats that check.
   })());
+});
+
+// index.html has always posted this message; without a listener it did nothing.
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
     await Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)));
-    await self.clients.claim();
+    // No clients.claim() on purpose. Claiming an already-loaded page fires
+    // 'controllerchange', and index.html reloads on that — which meant every
+    // launch after a deploy downloaded the whole 2.2 MB page twice. The page
+    // already open has the fresh HTML anyway; the worker takes over from the
+    // next launch, with no reload at all.
   })());
 });
 
@@ -55,14 +68,16 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
 
   if (isPageRequest(request)) {
-    // NETWORK FIRST for the page. The old worker was cache-first for
-    // everything, so once index.html was cached it was served from there for
-    // ever and a new deploy could never reach anyone — the in-page
-    // BUILD_VERSION cache purge could not help either, because the new
-    // index.html carrying the new version was exactly what never arrived.
+    // NETWORK FIRST for the page, and genuinely so: cache 'no-cache' forces a
+    // conditional request to the server instead of quietly reusing the HTTP
+    // cache. GitHub Pages sends Cache-Control: max-age=600, so a plain fetch()
+    // kept serving the previous build for up to ten minutes after a deploy
+    // even though this handler looked like it went to the network. The
+    // revalidation is cheap: the server answers 304 with no body unless the
+    // file actually changed.
     event.respondWith((async () => {
       try {
-        const fresh = await fetch(request);
+        const fresh = await fetch(request, { cache: 'no-cache' });
         if (fresh && fresh.status === 200) {
           const clone = fresh.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(request, clone)).catch(() => {});
