@@ -11161,6 +11161,23 @@
     return m + ':' + String(s).padStart(2,'0');
   }
 
+  // Whose pieces these ARE, ignoring any takeover. Each of the four corner
+  // bars belongs to one colour, so this is what must be shown there: with
+  // controllerColor() applied instead, a captured king made two colours share
+  // one controller and two bars showed the same name, while the player whose
+  // king had fallen vanished from the board although still in the game.
+  function ownerNicknameForColor(color){
+    if(onlineRoomId){
+      const side = onlineSeatForColor(color);
+      const nick = (side === onlineSide) ? myNick : onlinePlayers[side];
+      return nick || colorLabel(color);
+    }
+    const n = MODE_PLAYER_NUM[mode][color];
+    if(isBotSeat(n)) return '🤖 ' + t('botTag') + ' ' + botLevel[n];
+    return localPlayerName(n) || playerLabel(n);
+  }
+  // Who is playing these pieces right now — the same thing unless the king
+  // was captured and the army changed hands.
   function nicknameForColor(color){
     const ctrl = controllerColor(color);
     if(onlineRoomId){
@@ -11224,12 +11241,17 @@
       // shows up as a steady flicker. So the structure is built only when it
       // actually changes — a different player, a new captured piece — and the
       // per-second update just writes the two clock strings.
-      const signature = c + '|' + nicknameForColor(c) + '|' + icons;
+      // "OWNER → CONTROLLER" once a king has fallen, plain owner otherwise.
+      const ownNick  = ownerNicknameForColor(c);
+      const ctrlNick = nicknameForColor(c);
+      const barNick  = (ctrlNick && ctrlNick !== ownNick)
+                       ? (ownNick + ' → ' + ctrlNick) : ownNick;
+      const signature = c + '|' + barNick + '|' + icons;
       if(bar.dataset.sig !== signature){
         bar.dataset.sig = signature;
         bar.innerHTML =
           '<div class="corner-bar-top-row">' +
-            '<span class="corner-bar-nick" title="' + escapeHtml(nicknameForColor(c)) + '"><span class="corner-bar-dot" style="background:var(--accent-' + CSSCOLOR[c] + ')"></span>' + escapeHtml(nicknameForColor(c)) + '</span>' +
+            '<span class="corner-bar-nick" title="' + escapeHtml(barNick) + '"><span class="corner-bar-dot" style="background:var(--accent-' + CSSCOLOR[c] + ')"></span>' + escapeHtml(barNick) + '</span>' +
             '<button type="button" class="corner-bar-movelimit" title="' + escapeHtml(t('moveLimitLabel')) + '"></button>' +
             '<span class="corner-bar-timer" title="' + escapeHtml(t('changeTimerBtn')) + '"></span>' +
           '</div>' +
