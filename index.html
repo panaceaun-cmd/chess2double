@@ -2853,7 +2853,11 @@
   //   - a full board is sent anyway every SYNC_KEYFRAME_EVERY pushes, when the
   //     diff is large, and while the room is not yet full.
   // Set SYNC_DELTA_ENABLED to false to go back to sending the full board.
-  const SYNC_DELTA_ENABLED = true;
+  // OFF by default. The delta path shipped with two faults that jammed live
+  // rooms (see the notes on baseSeq and on the resync answer below). Both are
+  // fixed now, but it stays off until it has been tested on two real devices.
+  // Flip to true only after that.
+  const SYNC_DELTA_ENABLED = false;
   const SYNC_KEYFRAME_EVERY = 8;   // full board at least this often
   // A captured king hands over a whole army, which can be ~16 squares at the
   // start of a game and more once pieces have been absorbed twice. Keep the
@@ -8186,8 +8190,12 @@
       // Someone could not rebuild the board from a diff. Anyone whose own
       // board is up to date answers with a full one; the next payload has no
       // resyncReq in it, which is what stops this repeating.
-      if(room.resyncReq && room.resyncReq !== myNick && board
-         && (room.moveSeq || 0) <= lastAppliedSeq){
+      // The condition used to be "(room.moveSeq||0) <= lastAppliedSeq", i.e.
+      // only a client already level with the room could answer. But when the
+      // room jams, EVERY client is behind it, so nobody ever answered and the
+      // request sat there for good — exactly what 'resyncReq' stuck in the
+      // record showed. Anyone holding a real position answers now.
+      if(room.resyncReq && room.resyncReq !== myNick && boardHasPieces(board)){
         sinceKeyframe = SYNC_KEYFRAME_EVERY; // forces a full board
         pushRoomState(null);
         return;
@@ -8250,14 +8258,20 @@
     if(!room.board){
       let rebuilt = null;
       if(room.diff && Array.isArray(room.diff)){
-        // a move: rebuild from the changed squares, on top of what we have
-        if(board && room.baseSeq === lastAppliedSeq) rebuilt = applyCellDiff(board, room.diff);
+        // Rebuild from the changed squares and let the HASH decide whether the
+        // result is right. The sequence number must not be the gate: eleven
+        // places in this file bump room.moveSeq straight on the stored object
+        // (seat swap, undo, invites, settings), which left moveSeq ahead of
+        // baseSeq on a payload that carried no board. Every client then judged
+        // the diff unusable, and the room jammed with an empty board for
+        // everyone. The hash catches a genuinely wrong rebuild anyway.
+        if(board) rebuilt = applyCellDiff(board, room.diff);
       } else if(board){
         // no board and no diff means nothing on the board changed — this is a
         // metadata-only update, such as two players swapping seats
         rebuilt = board;
       }
-      if(!rebuilt || (isFinite(room.bh) && boardHash(rebuilt) !== room.bh)){
+      if(!rebuilt || !boardHasPieces(rebuilt) || (isFinite(room.bh) && boardHash(rebuilt) !== room.bh)){
         // Out of step with the sender — keep the board we have, which is still
         // a real position, and ask for a full one instead of guessing.
         resyncWanted = true;
@@ -8265,7 +8279,7 @@
         return;
       }
       room.board = rebuilt;
-    } else if(isFinite(room.bh) && boardHash(room.board) !== room.bh){
+    } else if(!boardHasPieces(room.board) || (isFinite(room.bh) && boardHash(room.board) !== room.bh)){
       // A full board that does not match its own hash means the payload was
       // damaged in transit; ignoring it leaves the previous position intact.
       return;
@@ -8379,6 +8393,13 @@
     return h;
   }
   function cloneBoard(b){ return JSON.parse(JSON.stringify(b)); }
+  // A position with no pieces at all cannot be real; accepting one is how an
+  // empty board spreads from one client to the rest.
+  function boardHasPieces(b){
+    if(!Array.isArray(b)) return false;
+    for(const row of b){ if(Array.isArray(row) && row.some(cell => cell)) return true; }
+    return false;
+  }
   // Returns the squares that differ, as [row, col, newValue]. null means empty.
   function boardCellDiff(prev, next){
     const out = [];
