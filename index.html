@@ -1626,6 +1626,19 @@
     padding:16px 18px; box-shadow:0 12px 34px rgba(0,0,0,.5);
   }
   #puzzle-selector-panel.show{ display:block; }
+  /* The panel scrolls, so the × is sticky rather than absolute: an absolutely
+     positioned button would scroll away with the list and stop being a quick
+     way out, which is the whole point of it. */
+  .puzzle-x{
+    position:sticky; top:0; float:right; z-index:2;
+    width:30px; height:30px; padding:0; margin:-6px -6px 0 8px;
+    display:flex; align-items:center; justify-content:center;
+    font-size:22px; line-height:1; font-family:inherit;
+    color:var(--brass); background:rgba(0,0,0,.35);
+    border:1px solid var(--brass); border-radius:8px;
+    cursor:pointer; transition:background .15s, color .15s;
+  }
+  .puzzle-x:hover, .puzzle-x:focus-visible{ background:var(--brass); color:#180f0a; outline:none; }
   .puzzle-group-title{
     font-family:'Cinzel',serif; font-weight:700; color:var(--brass);
     font-size:15px; margin:14px 0 6px; text-transform:uppercase; letter-spacing:.04em;
@@ -2221,6 +2234,7 @@
       </div>
 
       <div id="puzzle-selector-panel">
+        <button class="puzzle-x" id="puzzle-selector-x" type="button" aria-label="Закрыть">×</button>
         <div class="panel-header" id="puzzle-selector-title">🎯 Тренировка: выберите задачу</div>
         <div id="puzzle-selector-list"></div>
         <button class="btn secondary" id="puzzle-selector-close" type="button">Закрыть</button>
@@ -13146,8 +13160,13 @@
     populateChatSenders();
     newGame();
   }
-  document.getElementById('puzzle-selector-close').addEventListener('click', () => {
-    document.getElementById('puzzle-selector-panel').classList.remove('show');
+  // Both ways out close the same panel: the × in the corner and the button at
+  // the bottom of the list.
+  ['puzzle-selector-close', 'puzzle-selector-x'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.addEventListener('click', () => {
+      document.getElementById('puzzle-selector-panel').classList.remove('show');
+    });
   });
   document.getElementById('training-retry-btn').addEventListener('click', () => {
     if(!trainingActive || !currentPuzzle) return;
