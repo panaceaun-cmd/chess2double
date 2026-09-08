@@ -9686,7 +9686,11 @@
       appendSystemToast(t('voicePausedForCallMsg'));
     }
     if(!directCallPeerConnection) establishDirectCallConnection();
-    showDirectCallBar(t('directCallWith') + ' ' + activeDirectCall.otherNick);
+    // Was: the bar jumped straight to "On call with X" here, even though the
+    // media connection had not been negotiated yet — so "connected" on screen
+    // meant nothing. onconnectionstatechange sets that text for real when the
+    // peer connection actually reaches 'connected'.
+    showDirectCallBar(t('voiceChatConnecting'));
   }
   async function declineDirectCall(){
     if(!pendingDirectCallIncoming) return;
@@ -9876,10 +9880,24 @@
     const streams = [];
     if(typeof voiceLocalStream !== 'undefined' && voiceLocalStream) streams.push(voiceLocalStream);
     if(typeof groupVoiceLocalStream !== 'undefined' && groupVoiceLocalStream) streams.push(groupVoiceLocalStream);
-    if(typeof directCallLocalStream !== 'undefined' && directCallLocalStream) streams.push(directCallLocalStream);
+    // NOTE: directCallLocalStream is deliberately NOT here. Walkie-talkie mode
+    // exists for the table, where several people share one channel. A private
+    // call between two friends is an ordinary phone call and must work with
+    // the microphone simply open — the more so because the Talk button only
+    // exists under the board, and a friend call can happen with no game
+    // started at all, leaving a phone user no way to transmit whatsoever.
+    // getActiveDirectCallStreams() below covers it where it is really needed.
     return streams;
   }
+  function getActiveDirectCallStreams(){
+    return (typeof directCallLocalStream !== 'undefined' && directCallLocalStream)
+      ? [directCallLocalStream] : [];
+  }
   function applyPttMuting(){
+    // The private call always transmits, whatever walkie-talkie mode says.
+    getActiveDirectCallStreams().forEach(stream => {
+      stream.getAudioTracks().forEach(track => { track.enabled = true; });
+    });
     const streams = getActiveVoiceStreams();
     if(streams.length === 0) return;
     const shouldTransmit = !pttEnabled || pttActive;
@@ -9928,7 +9946,9 @@
   // doesn't make sense once other people are connected), so that same
   // otherwise-unused slot becomes "Talk" exactly when PTT needs it.
   function updatePttHoldButtonVisibility(){
-    const anyCallActive = voiceActive || groupVoiceActive || !!activeDirectCall;
+    // A private friend call is no longer push-to-talk, so it must not turn the
+    // button into "Talk" — that would offer a control that does nothing.
+    const anyCallActive = voiceActive || groupVoiceActive;
     const talkMode = !!(onlineRoomId && pttEnabled && anyCallActive);
     const pauseBtn = document.getElementById('pause-btn');
     if(pauseBtn){
