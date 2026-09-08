@@ -7793,6 +7793,11 @@
               room.players = {};
               room.moveSeq = (room.moveSeq || 0) + 1;
               await storeSet('room:' + onlineRoomId, JSON.stringify(room), true);
+              // The waiting players read 'cancelled' from this write, then the
+              // room is of no use to anyone — it used to sit in the database
+              // for ever with a full board inside.
+              const cancelledRoom = onlineRoomId;
+              setTimeout(() => cleanupRoomData(cancelledRoom), 8000);
             } else if(room.players[onlineSide] === myNick){
               delete room.players[onlineSide];
               room.moveSeq = (room.moveSeq||0) + 1;
@@ -8247,6 +8252,21 @@
   // easily outlast while still very much in progress. Called on every
   // synced move (both sending and receiving), so a genuinely active game
   // never goes stale, while an abandoned one still correctly does.
+  // Every branch that is keyed by a room id. A played game used to leave all
+  // of this behind for good: the room record alone is ~3 KB because it carries
+  // the whole board, plus chat, presence and signalling on top.
+  const ROOM_SCOPED_BRANCHES = [
+    'room', 'room-chat', 'room-presence', 'room-left', 'rematch-request',
+    'undo-request', 'swap-request', 'timer-request', 'movelimit-request',
+    'voice-signal', 'file-signal'
+  ];
+  function cleanupRoomData(roomId){
+    if(!fbDb || !roomId) return;
+    ROOM_SCOPED_BRANCHES.forEach(branch => {
+      try{ fbDb.ref(branch + '/' + roomId).remove(); }catch(e){}
+    });
+  }
+
   function refreshLastRoomTimestamp(){
     if(!onlineRoomId || !onlineSide) return;
     try{ localStorage.setItem('chess2-last-room', JSON.stringify({roomId: onlineRoomId, seat: onlineSide, ts: Date.now()})); }catch(e){}
@@ -8949,8 +8969,16 @@
     // final safety net: wipe anything left in this room's voice/file
     // signaling regardless of which path above already handled it
     if(fbDb && onlineRoomId){
-      try{ fbDb.ref('voice-signal/' + onlineRoomId).remove(); }catch(e){}
-      try{ fbDb.ref('file-signal/' + onlineRoomId).remove(); }catch(e){}
+      const finishedRoom = onlineRoomId;
+      try{ fbDb.ref('voice-signal/' + finishedRoom).remove(); }catch(e){}
+      try{ fbDb.ref('file-signal/' + finishedRoom).remove(); }catch(e){}
+      // Deliberately NOT on game over: a rematch reuses the same room id and
+      // still needs the record. Cleanup happens when someone actually leaves.
+      // Only the player who pressed the button deletes — everyone else gets
+      // here with notifyOther === false after reading the "left" notice, so
+      // there is exactly one deleter and no race. The delay leaves them time
+      // to read that notice out of the room before it disappears.
+      if(notifyOther !== false) setTimeout(() => cleanupRoomData(finishedRoom), 8000);
     }
     stopCallStateListener();
     stopRoomChatListener();
