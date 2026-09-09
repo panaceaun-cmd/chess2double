@@ -2181,16 +2181,6 @@
         <div class="chat-header">
           <span id="discuss-title">🎙️ Голосовая связь/Чат</span>
         </div>
-        <!-- Diagnostics panel. Visible from the start on purpose: hidden until
-             the first entry, it was missed entirely, and a log nobody can find
-             is no better than no log. -->
-        <div id="voice-log-box" style="margin-top:6px; margin-bottom:6px; border:1px solid var(--brass); border-radius:8px; padding:6px; background:rgba(0,0,0,.35);">
-          <div style="display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:4px;">
-            <b style="font-size:11px; color:var(--brass);">Журнал связи</b>
-            <button type="button" id="voice-log-copy" class="btn small" style="font-size:11px; padding:2px 8px;">Копировать</button>
-          </div>
-          <span id="voice-chat-diag" style="display:block; font-size:11px; line-height:1.35; color:#e8e0d0; font-family:monospace; white-space:pre-wrap; max-height:170px; overflow-y:auto; text-align:left;">журнал пуст — событий связи ещё не было</span>
-        </div>
         <div id="chat-log"></div>
         <form id="chat-form">
           <select id="chat-sender"></select>
@@ -2201,6 +2191,7 @@
         <div class="voice-chat-row">
           <button type="button" class="btn" id="voice-chat-btn" style="display:none; font-size:15px; padding:12px 20px; font-weight:700;">🔇 Говорить с игроками онлайн</button>
           <span id="voice-chat-status"></span>
+          <span id="voice-chat-diag" style="display:block; font-size:10px; color:var(--ink-dim); opacity:.8; margin-top:2px;"></span>
         </div>
         <div class="voice-chat-row" id="ptt-toggle-row" style="display:none; align-items:center; gap:6px; font-size:12.5px; flex-wrap:wrap;">
           <input type="checkbox" id="ptt-mode-toggle-2">
@@ -10824,18 +10815,6 @@
   // reasoning was done without ever seeing what the code actually does on a
   // real device. This records the sequence so it can simply be read off the
   // screen: connection states, restart requests, epoch traffic, errors.
-  function fallbackCopy(text, done){
-    try{
-      const ta = document.createElement('textarea');
-      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
-      document.body.appendChild(ta); ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      if(done) done();
-    }catch(e){}
-  }
-  const VOICE_LOG_MAX = 40;
-  let voiceLog = [];
   // Silent failures have cost this project several evenings: an async chain
   // rejects, the page keeps working, and everything after the failing line
   // simply never runs with nothing on screen to show for it. These two
@@ -10852,50 +10831,12 @@
     });
   }catch(e){}
 
+  // Console-only trace. The on-screen log is gone, but the calls stay: they
+  // cost nothing, and this session showed how expensive a silent failure is —
+  // one line in the console beats an evening of guessing.
   function vlog(msg){
-    const t0 = new Date();
-    const stamp = String(t0.getMinutes()).padStart(2,'0') + ':' +
-                  String(t0.getSeconds()).padStart(2,'0');
-    voiceLog.push(stamp + ' ' + msg);
-    if(voiceLog.length > VOICE_LOG_MAX) voiceLog = voiceLog.slice(-VOICE_LOG_MAX);
-    const btn = document.getElementById('voice-log-copy');
-    if(btn && !btn.dataset.wired){
-      btn.dataset.wired = '1';
-      {
-        btn.addEventListener('click', () => {
-          const text = voiceLog.join('\n');
-          // Clipboard API needs https or localhost; the textarea fallback works
-          // everywhere, including the file:// and http cases.
-          const done = () => { btn.textContent = 'Скопировано'; setTimeout(() => { btn.textContent = 'Копировать'; }, 1500); };
-          if(navigator.clipboard && navigator.clipboard.writeText){
-            navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
-          } else { fallbackCopy(text, done); }
-        });
-      }
-    }
-    paintVoiceLog();
     try{ console.log('[voice] ' + msg); }catch(e){}
   }
-  // The panel markup is rebuilt after startup (draggable panels, layout), which
-  // wiped whatever had already been written into it — the log was being
-  // recorded correctly and then erased, which is why the box kept showing the
-  // placeholder while the console had the entries. Repainting on a slow timer
-  // survives any rebuild, whoever does it and whenever.
-  function paintVoiceLog(){
-    const diag = document.getElementById('voice-chat-diag');
-    if(diag && voiceLog.length){
-      const text = voiceLog.join('\n');
-      if(diag.textContent !== text){
-        diag.style.whiteSpace = 'pre-wrap';
-        diag.style.maxHeight = '160px';
-        diag.style.overflowY = 'auto';
-        diag.style.textAlign = 'left';
-        diag.textContent = text;
-        diag.scrollTop = diag.scrollHeight;
-      }
-    }
-  }
-  setInterval(paintVoiceLog, 1000);
   function showVoiceDiagError(msg){ vlog('ОШИБКА ' + msg); }
 
   function stopVoiceChatInternal(){
