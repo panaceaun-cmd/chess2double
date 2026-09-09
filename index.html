@@ -2181,6 +2181,16 @@
         <div class="chat-header">
           <span id="discuss-title">🎙️ Голосовая связь/Чат</span>
         </div>
+        <!-- Diagnostics panel. Visible from the start on purpose: hidden until
+             the first entry, it was missed entirely, and a log nobody can find
+             is no better than no log. -->
+        <div id="voice-log-box" style="margin-top:6px; margin-bottom:6px; border:1px solid var(--brass); border-radius:8px; padding:6px; background:rgba(0,0,0,.35);">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:4px;">
+            <b style="font-size:11px; color:var(--brass);">Журнал связи</b>
+            <button type="button" id="voice-log-copy" class="btn small" style="font-size:11px; padding:2px 8px;">Копировать</button>
+          </div>
+          <span id="voice-chat-diag" style="display:block; font-size:11px; line-height:1.35; color:#e8e0d0; font-family:monospace; white-space:pre-wrap; max-height:170px; overflow-y:auto; text-align:left;">журнал пуст — событий связи ещё не было</span>
+        </div>
         <div id="chat-log"></div>
         <form id="chat-form">
           <select id="chat-sender"></select>
@@ -2191,13 +2201,6 @@
         <div class="voice-chat-row">
           <button type="button" class="btn" id="voice-chat-btn" style="display:none; font-size:15px; padding:12px 20px; font-weight:700;">🔇 Говорить с игроками онлайн</button>
           <span id="voice-chat-status"></span>
-          <div id="voice-log-box" style="display:none; margin-top:6px; border:1px solid var(--brass); border-radius:8px; padding:6px; background:rgba(0,0,0,.35);">
-            <div style="display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:4px;">
-              <b style="font-size:11px; color:var(--brass);">Журнал связи</b>
-              <button type="button" id="voice-log-copy" class="btn small" style="font-size:11px; padding:2px 8px;">Копировать</button>
-            </div>
-            <span id="voice-chat-diag" style="display:block; font-size:11px; line-height:1.35; color:#e8e0d0; font-family:monospace;"></span>
-          </div>
         </div>
         <div class="voice-chat-row" id="ptt-toggle-row" style="display:none; align-items:center; gap:6px; font-size:12.5px; flex-wrap:wrap;">
           <input type="checkbox" id="ptt-mode-toggle-2">
@@ -9925,6 +9928,8 @@
       vlog('ЗВОНОК: запись прошла, жду ответа');
     }catch(e){
       vlog('ЗВОНОК: ЗАПИСЬ ОТКЛОНЕНА — ' + (e && e.message));
+      // Also into the game chat: that is where the player actually looks.
+      appendChatMessage(t('systemLabel'), t('callFailedMsg') + ' (' + (e && e.message) + ')', true);
       appendSystemToast(t('callFailedMsg'));
       endDirectCallLocal();
     }
@@ -10784,12 +10789,10 @@
                   String(t0.getSeconds()).padStart(2,'0');
     voiceLog.push(stamp + ' ' + msg);
     if(voiceLog.length > VOICE_LOG_MAX) voiceLog = voiceLog.slice(-VOICE_LOG_MAX);
-    const box = document.getElementById('voice-log-box');
-    if(box && box.style.display === 'none'){
-      box.style.display = 'block';
-      const btn = document.getElementById('voice-log-copy');
-      if(btn && !btn.dataset.wired){
-        btn.dataset.wired = '1';
+    const btn = document.getElementById('voice-log-copy');
+    if(btn && !btn.dataset.wired){
+      btn.dataset.wired = '1';
+      {
         btn.addEventListener('click', () => {
           const text = voiceLog.join('\n');
           // Clipboard API needs https or localhost; the textarea fallback works
