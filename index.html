@@ -8306,16 +8306,28 @@
       // artificially "not stale yet" or artificially "very stale".
       const staleFor = presenceStaleFor(onlineOpponent, raw);
       if(staleFor <= 45000){
-        if(opponentReconnectingSince){ opponentReconnectingSince = null; hideOpponentReconnectingBanner(); hideDisconnectNotice(); }
+        if(opponentReconnectingSince){
+          opponentReconnectingSince = null;
+          // seatReconnectingSince is what freezes the clocks, and it used to be
+          // filled in only by the 3-4 player branch below — so in a game for
+          // two the disconnected player's clock kept running down while they
+          // were unreachable. Keep both in step here.
+          const oppSeat2 = (onlineSide === 'p1') ? 'p2' : 'p1';
+          delete seatReconnectingSince[oppSeat2];
+          hideOpponentReconnectingBanner(); hideDisconnectNotice();
+        }
         return;
       }
       if(!opponentReconnectingSince){
         opponentReconnectingSince = Date.now();
+        // Mark the seat too, so the clocks stop the moment the turn reaches it.
+        seatReconnectingSince[(onlineSide === 'p1') ? 'p2' : 'p1'] = Date.now();
         showOpponentReconnectingBanner();
         showDisconnectNotice(onlineOpponent);
         appendChatMessage(t('systemLabel'), onlineOpponent + ' ' + t('opponentReconnecting'), true);
       }
       if(Date.now() - opponentReconnectingSince > RECONNECT_MAX_MS){
+        delete seatReconnectingSince[(onlineSide === 'p1') ? 'p2' : 'p1'];
         opponentDisconnectDeclared = true;
         hideOpponentReconnectingBanner();
         showEliminatedNotice(onlineOpponent);
