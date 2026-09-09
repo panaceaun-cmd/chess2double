@@ -1,0 +1,12 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "io.github.panaceaun_cmd.chess2double",
+    "sha256_cert_fingerprints": [
+      "18:E9:86:E6:61:45:84:1F:E0:84:15:AF:FC:22:10:87:F4:A6:88:E1:F0:2E:42:18:75:F8:65:D9:5D:46:8A:9D",
+      "87:48:42:AC:EB:71:7F:9C:EF:DF:9D:10:38:B1:D2:7E:48:3C:83:0E:51:2D:CD:35:9C:7E:25:56:66:87:5F:43",
+      "89:3E:DD:DF:51:12:F5:B0:1B:3E:8B:8C:C7:F6:70:EF:4E:0B:1C:46:3E:0D:4A:45:39:84:F0:82:D6:78:2B:5B"
+    ]
+  }
+}]
