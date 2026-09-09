@@ -3364,7 +3364,11 @@
     wrap.innerHTML='';
     ['2p','3p','4p','ffa','training'].forEach(m=>{
       const card = document.createElement('div');
-      card.className = 'menu-card' + (m===mode ? ' active' : '');
+      // Training is a solo puzzle mode: it cannot apply to a game already
+      // running with other people, so it is the only card kept out of reach.
+      const blockedNow = !!(onlineRoomId && m === 'training');
+      card.className = 'menu-card' + (m===mode ? ' active' : '') + (blockedNow ? ' menu-card-off' : '');
+      if(blockedNow){ card.style.opacity = '.45'; card.style.pointerEvents = 'none'; }
       const h4 = document.createElement('h4');
       h4.textContent = modeMetaTitle(m);
       card.appendChild(h4);
@@ -8282,8 +8286,11 @@
     startRoomPresence();
     startMoveChannels();
 
-    document.getElementById('mode-select').style.opacity = '.5';
-    document.getElementById('mode-select').style.pointerEvents = 'none';
+    // The mode menu used to be greyed out and click-blocked for the whole
+    // online game. It now changes the mode of the game in progress instead of
+    // starting a new one, so it stays usable — and without it seats can never
+    // be freed, which is why inviting a third player kept creating a new room
+    // instead of adding them here.
 
     startRoomStateListener(roomId);
     // Voice and file transfer now both work for any room size — voice via a
@@ -9588,6 +9595,7 @@
     onlinePlayers = {}; onlineMaxPlayers = 2; seatReconnectingSince = {};
     document.getElementById('mode-select').style.opacity = '';
     document.getElementById('mode-select').style.pointerEvents = '';
+    renderModeMenu();   // training becomes available again outside a room
     updateOnlineBar();
     updateTeamVoiceRow();
     newGame();
