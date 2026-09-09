@@ -9060,6 +9060,7 @@
       // restarts it when the network returns. '.info/connected' is the signal
       // that the network is genuinely back, so recovery is driven from here.
       if(connected){
+        if(voiceActive) vlog('сеть вернулась');
         if(voiceRecoveryTimer) clearTimeout(voiceRecoveryTimer);
         // A short delay lets the signalling channel settle before offers fly.
         voiceRecoveryTimer = setTimeout(() => {
@@ -10412,7 +10413,8 @@
       const v = snap.val();
       if(!v || v === lastVoiceEpoch) return;      // our own bump, or nothing new
       lastVoiceEpoch = v;
-      if(!voiceActive) return;
+      vlog('пришла метка перезапуска');
+      if(!voiceActive){ vlog('  но связь выключена — игнорирую'); return; }
       // Guard against the two sides bouncing restarts off each other when both
       // notice the break at the same moment.
       if(Date.now() - lastVoiceRebuildAt < 6000) return;
@@ -10438,6 +10440,8 @@
       if(!voiceActive){ stopVoiceHealthWatchdog(); return; }
       const st = voicePeerConnection && voicePeerConnection.connectionState;
       if(st === 'connected'){ voiceLastConnectedAt = Date.now(); return; }
+      const down = Math.round((Date.now() - voiceLastConnectedAt)/1000);
+      vlog('сторож: ' + (st || 'нет соединения') + ', не в связи ' + down + ' с');
       if(Date.now() - voiceLastConnectedAt < VOICE_UNHEALTHY_MS) return;
       // Give up only after the same five minutes the rest of the app uses.
       if(Date.now() - voiceLastConnectedAt > RECONNECT_MAX_MS) return;
@@ -10471,6 +10475,7 @@
   async function restartVoiceChat(){
     if(voiceRestarting || !voiceActive || !onlineRoomId || !fbDb) return;
     voiceRestarting = true;
+    vlog('ПЕРЕЗАПУСК: выключаю связь');
     const statusEl = document.getElementById('voice-chat-status');
     if(statusEl) statusEl.textContent = t('voiceChatReconnecting');
     try{
@@ -10479,6 +10484,7 @@
       // new offer can be deleted a moment after it is published.
       await new Promise(r => setTimeout(r, 600));
       await startVoiceChatInternal();
+      vlog('ПЕРЕЗАПУСК: включил, voiceActive=' + voiceActive);
     }catch(e){
       showVoiceDiagError('restart: ' + (e && e.message));
     }
@@ -10488,8 +10494,12 @@
   // Ask both sides to start over. Sets the value locally first, so our own
   // write does not come back and trigger us a second time.
   function requestVoiceRenegotiation(){
-    if(!voiceActive || !onlineRoomId || !fbDb) return;
-    if(Date.now() - lastVoiceRebuildAt < 6000) return;
+    if(!voiceActive || !onlineRoomId || !fbDb){
+      vlog('запрос перезапуска отклонён: voiceActive=' + voiceActive + ' room=' + !!onlineRoomId);
+      return;
+    }
+    if(Date.now() - lastVoiceRebuildAt < 6000){ vlog('запрос перезапуска: рано, ждём окно'); return; }
+    vlog('ЗАПРОС ПЕРЕЗАПУСКА, пишу метку');
     lastVoiceRebuildAt = Date.now();
     const v = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     lastVoiceEpoch = v;
@@ -10510,6 +10520,7 @@
       return;
     }
     voiceActive = true;
+    vlog('связь включена, микрофон получен');
     updateVoiceChatButton();
     updatePttHoldButtonVisibility();
     startVoiceEpochListener();
@@ -10520,6 +10531,7 @@
 
   function establishVoicePeerConnection(){
     if(!voiceActive || !onlineRoomId || !fbDb) return;
+    vlog('строю соединение, я ' + onlineSide);
     const roomId = onlineRoomId;
     const statusEl = document.getElementById('voice-chat-status');
     if(statusEl) statusEl.textContent = t('voiceChatConnecting');
@@ -10570,6 +10582,7 @@
     voicePeerConnection.onconnectionstatechange = () => {
       if(!voicePeerConnection) return;
       const st = voicePeerConnection.connectionState;
+      vlog('состояние: ' + st);
       const el = document.getElementById('voice-chat-status');
       if(st === 'connected'){
         if(el) el.textContent = t('voiceChatConnected');
@@ -10689,12 +10702,33 @@
      }
     })();
   }
-  function showVoiceDiagError(msg){
+  // On-screen voice log. Five attempts to fix reconnection failed because the
+  // reasoning was done without ever seeing what the code actually does on a
+  // real device. This records the sequence so it can simply be read off the
+  // screen: connection states, restart requests, epoch traffic, errors.
+  const VOICE_LOG_MAX = 40;
+  let voiceLog = [];
+  function vlog(msg){
+    const t0 = new Date();
+    const stamp = String(t0.getMinutes()).padStart(2,'0') + ':' +
+                  String(t0.getSeconds()).padStart(2,'0');
+    voiceLog.push(stamp + ' ' + msg);
+    if(voiceLog.length > VOICE_LOG_MAX) voiceLog = voiceLog.slice(-VOICE_LOG_MAX);
     const diag = document.getElementById('voice-chat-diag');
-    if(diag) diag.textContent = '⚠ ' + msg;
+    if(diag){
+      diag.style.whiteSpace = 'pre-wrap';
+      diag.style.maxHeight = '160px';
+      diag.style.overflowY = 'auto';
+      diag.style.textAlign = 'left';
+      diag.textContent = voiceLog.join('\n');
+      diag.scrollTop = diag.scrollHeight;
+    }
+    try{ console.log('[voice] ' + msg); }catch(e){}
   }
+  function showVoiceDiagError(msg){ vlog('ОШИБКА ' + msg); }
 
   function stopVoiceChatInternal(){
+    vlog('связь выключается (перезапуск=' + voiceRestarting + ')');
     clearVoiceInvite();   // don't leave a stale ring in the room record
     voiceActive = false;
     updateVoiceChatButton();
