@@ -7699,6 +7699,14 @@
   function onlineSeatForColor(color){
     return 'p' + MODE_PLAYER_NUM[mode][color];
   }
+  // Who may MOVE this colour right now. After a king falls its army passes to
+  // the capturer, and the three permission checks below used the plain seat
+  // mapping — so the pieces changed hands on screen while the new owner was
+  // still refused every move, and their original owner could not move them
+  // either. controllerColor() is what records the takeover.
+  function seatAllowedToMove(color){
+    return onlineSeatForColor(controllerColor(color));
+  }
 
   function maxPlayersForMode(m){
     return m === '3p' ? 3 : (m === '4p' || m === 'ffa') ? 4 : 2;
@@ -9264,12 +9272,21 @@
     bar.classList.add('show');
     const isTwoPlayer = onlineMaxPlayers <= 2;
     const friends = await getFriends();
-    const myColors = TURN_ORDER.filter(c => onlineSeatForColor(c) === onlineSide).map(colorLabel).join('/');
+    // Colours I actually play — including any army I captured.
+    const myColors = TURN_ORDER.filter(c => seatAllowedToMove(c) === onlineSide).map(colorLabel).join('/');
 
-    const opponentSeats = Object.keys(onlinePlayers).filter(s => s !== onlineSide && onlinePlayers[s]);
+    // A seat whose player ran out of time to return, and whose colours are all
+    // gone or handed over, is finished — it used to keep sitting in the panel
+    // as a live opponent long after the game had moved on without them.
+    const seatIsOut = (seat) => {
+      const cols = TURN_ORDER.filter(c => onlineSeatForColor(c) === seat);
+      return cols.length > 0 && cols.every(c => eliminatedColors.has(c) || takenOverBy[c]);
+    };
+    const opponentSeats = Object.keys(onlinePlayers)
+      .filter(s => s !== onlineSide && onlinePlayers[s] && !seatIsOut(s));
     const rowsHtml = opponentSeats.map((seat, i) => {
       const nick = onlinePlayers[seat];
-      const colors = TURN_ORDER.filter(c => onlineSeatForColor(c) === seat).map(colorLabel).join('/');
+      const colors = TURN_ORDER.filter(c => seatAllowedToMove(c) === seat).map(colorLabel).join('/');
       const alreadyFriend = friends.includes(nick);
       const statusDot = i === 0 ? '<span id="connection-status-dot" title="">🟢</span><span id="opponent-status-indicator"></span> ' : '';
       return '<div class="ogb-row">' + statusDot +
@@ -12190,7 +12207,7 @@
       // the turn jumped several places, leaving each screen showing a
       // different player from the one the board was really waiting on. The
       // others simply pick up the result from the room.
-      if(onlineRoomId && onlineSide && onlineSeatForColor(turn) !== onlineSide) return;
+      if(onlineRoomId && onlineSide && seatAllowedToMove(turn) !== onlineSide) return;
       onMoveLimitReached();
     }
   }
@@ -14047,7 +14064,7 @@
     if(isPaused) return;
     if(skipTurnPending) return;
     if(isBotColor(turn)) return;
-    if(onlineRoomId && onlineSeatForColor(turn) !== onlineSide) return;
+    if(onlineRoomId && seatAllowedToMove(turn) !== onlineSide) return;
     const r = parseInt(e.currentTarget.dataset.r);
     const c = parseInt(e.currentTarget.dataset.c);
     const clickedPiece = board[r][c];
@@ -14642,7 +14659,7 @@
       }, 450);
       return true;
     }
-    const iControlThisColor = !onlineRoomId || onlineSeatForColor(turn) === onlineSide;
+    const iControlThisColor = !onlineRoomId || seatAllowedToMove(turn) === onlineSide;
     if(iControlThisColor){
       showSkipTurnPrompt();
     } else {
