@@ -8152,6 +8152,11 @@
     if(room.board){
       lastSentBoard = cloneBoard(room.board);
       awaitingFirstBoard = false;
+      // The record we just read may be up to twenty moves behind the live
+      // game. It is a complete, valid position, so nothing is broken — but ask
+      // whoever is playing for the current one straight away, so a newcomer is
+      // never a dozen moves out of date.
+      requestBoardResync();
     } else {
       // Joined onto a diff payload: there is no position here to start from.
       // Ask, keep asking, and make sure the player is not shown an empty board
@@ -8917,13 +8922,15 @@
     sinceFirebaseWrite += 1;
     const mustWriteFirebase = !deliveredToAll || membershipChanged ||
       gameOver || payload.status !== 'active' ||
-      sinceFirebaseWrite >= FIREBASE_WRITE_EVERY;
+      sinceFirebaseWrite >= FIREBASE_WRITE_EVERY ||
+      (Date.now() - lastFirebaseWriteAt) >= FIREBASE_WRITE_MAX_GAP_MS;
     if(!mustWriteFirebase){
       lastSentBoard = cloneBoard(board);
       lastAppliedSeq = onlineMoveSeq;
       return true;
     }
     sinceFirebaseWrite = 0;
+    lastFirebaseWriteAt = Date.now();
     const ok = await storeSet('room:' + onlineRoomId, json, true);
     // Only trust the diff base once the write actually went out. Our own push
     // is also the state everyone else's next diff will be built on, so it
@@ -11048,8 +11055,18 @@
   //
   // Firebase is still written on a slower cadence, so the room record always
   // holds a real, complete, recent board for anyone who arrives.
-  const MOVE_CHANNEL_ENABLED = false;   // flip to true after testing on two devices
-  const FIREBASE_WRITE_EVERY = 5;       // snapshot at least this often
+  // ON — tested on two devices and working. Set to false to send every move
+  // through Firebase again, exactly as before this existed.
+  const MOVE_CHANNEL_ENABLED = true;
+  // Raised from 5. The snapshot in Firebase can now lag the live game by up to
+  // twenty moves — which is fine for anyone already connected to the channel,
+  // but a newcomer reads exactly this record. Two things keep that safe: a
+  // time bound below (a snapshot at least once a minute, since twenty chess
+  // moves can span a long while), and a fresh-snapshot request sent by every
+  // client the moment it joins a room.
+  const FIREBASE_WRITE_EVERY = 20;
+  const FIREBASE_WRITE_MAX_GAP_MS = 60000;
+  let lastFirebaseWriteAt = 0;
   let movePeers = {};      // seat -> RTCPeerConnection
   let moveChannels = {};   // seat -> RTCDataChannel
   let moveFbRefs = [];
