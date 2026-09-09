@@ -9844,7 +9844,8 @@
 
   function startDirectCallListener(){
     stopDirectCallListener();
-    if(!fbDb || !myNick) return;
+    if(!fbDb || !myNick){ vlog('ЗВОНОК: слушатель не запущен (нет ника)'); return; }
+    vlog('ЗВОНОК: слушаю direct-call/' + myNick);
     directCallListenerRef = fbDb.ref(fbPath('direct-call:' + myNick));
     directCallListenerRef.on('value', (snap) => {
       const raw = snap.val();
@@ -9852,7 +9853,8 @@
         if(activeDirectCall || pendingDirectCallIncoming){ endDirectCallLocal(); }
         return;
       }
-      let data; try{ data = JSON.parse(raw); }catch(e){ return; }
+      let data; try{ data = JSON.parse(raw); }catch(e){ vlog('ЗВОНОК: запись не читается'); return; }
+      vlog('ЗВОНОК: входящее событие, состояние ' + data.state + ' от ' + data.from);
       handleDirectCallChange(data);
     });
   }
@@ -9910,6 +9912,7 @@
     if(!fbDb || !myNick || activeDirectCall) return;
     const callId = uid();
     activeDirectCall = { callId, otherNick: targetNick, isCaller: true };
+    vlog('ЗВОНОК: набираю ' + targetNick + ', пишу в direct-call/' + targetNick);
     updatePttHoldButtonVisibility();
     showDirectCallBar(t('callingLabel') + ' ' + targetNick + '...');
     // The write was previously unguarded. If the database rules do not allow
@@ -9919,7 +9922,9 @@
     try{
       await fbDb.ref(fbPath('direct-call:' + targetNick)).set(
         JSON.stringify({from: myNick, callId, state:'ringing'}));
+      vlog('ЗВОНОК: запись прошла, жду ответа');
     }catch(e){
+      vlog('ЗВОНОК: ЗАПИСЬ ОТКЛОНЕНА — ' + (e && e.message));
       appendSystemToast(t('callFailedMsg'));
       endDirectCallLocal();
     }
