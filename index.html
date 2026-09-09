@@ -6746,6 +6746,7 @@
   // the client's own perspective by the time they reconnect, so the
   // resume-offer needs its own watcher that's active independent of that.
   let globalReconnectWatcherRef = null;
+  let directCallRecoveryTimer = null;
   function startGlobalReconnectWatcher(){
     if(globalReconnectWatcherRef || !fbDb) return;
     globalReconnectWatcherRef = fbDb.ref('.info/connected');
@@ -6757,6 +6758,19 @@
         // so the record is gone and the arming is spent. Write it again and
         // re-arm, or we stay invisible to everyone for the rest of the session.
         if(myNick) writeMyPresence();
+        // A private friend call can be running with no game in progress, and
+        // the in-room connection watcher is not started then — so its recovery
+        // has to live here, in the watcher that runs all the time.
+        if(directCallRecoveryTimer) clearTimeout(directCallRecoveryTimer);
+        directCallRecoveryTimer = setTimeout(() => {
+          directCallRecoveryTimer = null;
+          try{
+            if(activeDirectCall && (!directCallPeerConnection ||
+               directCallPeerConnection.connectionState !== 'connected')){
+              establishDirectCallConnection();
+            }
+          }catch(e){}
+        }, 1500);
       }
       if(connected && wasConnected === false && !onlineRoomId){
         offerResumeIfInterrupted();
@@ -9012,6 +9026,7 @@
   // via the special .info/connected path, and re-syncs the live listeners
   // once back online so nothing looks "stuck" after a network blip.
   let connectionWatcherRef = null;
+  let voiceRecoveryTimer = null;
   function startConnectionWatcher(){
     stopConnectionWatcher();
     if(!fbDb) return;
@@ -9037,6 +9052,33 @@
             }
           }catch(e){}
         });
+      }
+      // Voice does not come back by itself. The retry lives inside
+      // onconnectionstatechange, which only fires on a state CHANGE: while the
+      // network is down the rebuilt peer connection sits in 'connecting' and
+      // never reports 'failed' again, so the retry chain stops and nothing
+      // restarts it when the network returns. '.info/connected' is the signal
+      // that the network is genuinely back, so recovery is driven from here.
+      if(connected){
+        if(voiceRecoveryTimer) clearTimeout(voiceRecoveryTimer);
+        // A short delay lets the signalling channel settle before offers fly.
+        voiceRecoveryTimer = setTimeout(() => {
+          voiceRecoveryTimer = null;
+          try{
+            if(voiceActive && (!voicePeerConnection || voicePeerConnection.connectionState !== 'connected')){
+              establishVoicePeerConnection();
+            }
+            // Group voice holds one peer connection per seat; rebuild only the
+            // ones that are not connected, so a partial outage does not tear
+            // down the links that survived.
+            if(typeof groupVoiceActive !== 'undefined' && groupVoiceActive){
+              voicePeerSeats().forEach(seat => {
+                const pc = groupVoicePeerConnections && groupVoicePeerConnections[seat];
+                if(!pc || pc.connectionState !== 'connected') establishGroupVoicePeer(seat);
+              });
+            }
+          }catch(e){}
+        }, 1500);
       }
       // re-register the onDisconnect hook every time a connection is
       // (re)established — Firebase clears these on each disconnect, so
