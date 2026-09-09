@@ -10403,17 +10403,21 @@
 
   function startVoiceEpochListener(){
     if(!fbDb || !onlineRoomId || voiceEpochRef) return;
-    voiceEpochRef = fbDb.ref(vPath('epoch'));
+    // Sits under voice-signal/<room>/restart — inside the branch the database
+    // rules already allow, but ABOVE the pair node, because a restart wipes
+    // the pair subtree and would otherwise delete the very signal telling the
+    // other side to restart.
+    voiceEpochRef = fbDb.ref('voice-signal/' + onlineRoomId + '/restart');
     voiceEpochRef.on('value', (snap) => {
       const v = snap.val();
       if(!v || v === lastVoiceEpoch) return;      // our own bump, or nothing new
       lastVoiceEpoch = v;
       if(!voiceActive) return;
-      // Guard against the two sides bouncing rebuilds off each other when both
+      // Guard against the two sides bouncing restarts off each other when both
       // notice the break at the same moment.
-      if(Date.now() - lastVoiceRebuildAt < 3000) return;
+      if(Date.now() - lastVoiceRebuildAt < 6000) return;
       lastVoiceRebuildAt = Date.now();
-      establishVoicePeerConnection();
+      restartVoiceChat();
     });
   }
   // Every recovery path so far hung on an EVENT arriving: a connection state
@@ -10446,18 +10450,52 @@
 
   function stopVoiceEpochListener(){
     if(voiceEpochRef){ try{ voiceEpochRef.off(); }catch(e){} voiceEpochRef = null; }
-    lastVoiceEpoch = null;
+    // lastVoiceEpoch is deliberately NOT cleared: a restart stops and starts
+    // this listener, and a cleared value would make the re-attached listener
+    // read the current epoch as brand new and restart again, for ever.
   }
+  // Full restart rather than renegotiation.
+  //
+  // Rebuilding just the peer connection kept failing, and after four attempts
+  // the honest conclusion is that some part of the half-torn-down state does
+  // not survive it. The FIRST connection of a call, on the other hand, works
+  // every time. So recovery now walks that same known-good path from the
+  // beginning: tear voice down completely, then start it exactly as the
+  // player's own button does.
+  //
+  // stopVoiceChatInternal() wipes voice-signal/<room> and clears the ring, so
+  // a plain stop+start would look to the other side like a hang-up. The epoch
+  // is therefore written FIRST and restored right after the teardown, and the
+  // 'ended' call state is suppressed for the duration.
+  let voiceRestarting = false;
+  async function restartVoiceChat(){
+    if(voiceRestarting || !voiceActive || !onlineRoomId || !fbDb) return;
+    voiceRestarting = true;
+    const statusEl = document.getElementById('voice-chat-status');
+    if(statusEl) statusEl.textContent = t('voiceChatReconnecting');
+    try{
+      stopVoiceChatInternal();
+      // Let the wipe land before the fresh signaling starts writing, or the
+      // new offer can be deleted a moment after it is published.
+      await new Promise(r => setTimeout(r, 600));
+      await startVoiceChatInternal();
+    }catch(e){
+      showVoiceDiagError('restart: ' + (e && e.message));
+    }
+    voiceRestarting = false;
+  }
+
   // Ask both sides to start over. Sets the value locally first, so our own
   // write does not come back and trigger us a second time.
   function requestVoiceRenegotiation(){
     if(!voiceActive || !onlineRoomId || !fbDb) return;
-    if(Date.now() - lastVoiceRebuildAt < 3000) return;
+    if(Date.now() - lastVoiceRebuildAt < 6000) return;
     lastVoiceRebuildAt = Date.now();
     const v = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     lastVoiceEpoch = v;
-    try{ fbDb.ref(vPath('epoch')).set(v); }catch(e){}
-    establishVoicePeerConnection();
+    // Written outside the pair node so the teardown below cannot erase it.
+    try{ fbDb.ref('voice-signal/' + onlineRoomId + '/restart').set(v); }catch(e){}
+    restartVoiceChat();
   }
   async function startVoiceChatInternal(){
     if(!onlineRoomId || !STORAGE_OK || voiceActive) return;
@@ -10674,10 +10712,19 @@
     if(voiceRemoteAudioEl){ voiceRemoteAudioEl.srcObject = null; }
     voiceFbRefs.forEach(ref => { try{ ref.off(); }catch(e){} });
     voiceFbRefs = [];
-    // wipe the whole signaling record, not just my own side — nothing about
-    // this call should remain on the server once it's over
+    // Wipe the signaling record — nothing about this call should remain on the
+    // server once it is over. During a restart only the pair subtree goes:
+    // the room node also holds 'restart', which is what tells the other side
+    // to come back, and removing it would cancel the recovery we are in.
     if(onlineRoomId && STORAGE_OK && fbDb){
-      try{ fbDb.ref('voice-signal/' + onlineRoomId).remove(); }catch(e){}
+      try{
+        if(voiceRestarting){
+          const other = onlineSide === 'p1' ? 'p2' : 'p1';
+          fbDb.ref('voice-signal/' + onlineRoomId + '/' + pairKeyFor(onlineSide, other)).remove();
+        } else {
+          fbDb.ref('voice-signal/' + onlineRoomId).remove();
+        }
+      }catch(e){}
     }
   }
 
