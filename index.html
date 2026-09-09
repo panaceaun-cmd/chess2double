@@ -3317,6 +3317,8 @@
   // re-render triggered by something else (selecting a piece, a resize,
   // etc.), which shouldn't replay the movement animation.
   let lastAnimatedMoveRef = null;
+  // Start rect handed over by applyRemoteState for a move made by someone else.
+  let pendingRemoteAnimFrom = null;
   try{
     orientationMode = parseInt(localStorage.getItem('chess2-orientation')) || 1;
     boardTheme = localStorage.getItem('chess2-theme') || 'beige-brown';
@@ -8708,6 +8710,20 @@
       resetMoveClock();
     }
     onlineUndoSeq = remoteUndoSeq;
+    // Capture where the moving piece is RIGHT NOW, before the board array is
+    // replaced. render() does the same for a local move, but on the receiving
+    // side the sequence of updates around it left that rect missing, so the
+    // piece jumped straight to its destination instead of sliding. The DOM
+    // here still shows the previous position — exactly what the animation
+    // needs as its starting point.
+    if(room.lastMove && room.lastMove.from){
+      const be = document.getElementById('board');
+      const fromSq = be && be.querySelector('.sq[data-r="' + room.lastMove.from.r + '"][data-c="' + room.lastMove.from.c + '"]');
+      if(fromSq){
+        const rc = fromSq.getBoundingClientRect();
+        if(rc.width > 0 && rc.height > 0) pendingRemoteAnimFrom = rc;
+      }
+    }
     board = room.board;
     turnIndex = room.turnIndex;
     turn = TURN_ORDER[turnIndex];
@@ -13226,6 +13242,10 @@
         const rect = fromSq.getBoundingClientRect();
         if(rect.width > 0 && rect.height > 0) animateFromRect = rect;
       }
+      // A remote move: applyRemoteState grabbed the start position before it
+      // swapped the board, so use that if we could not take one ourselves.
+      if(!animateFromRect && pendingRemoteAnimFrom) animateFromRect = pendingRemoteAnimFrom;
+      pendingRemoteAnimFrom = null;
       if(lastMove.capture){
         const toSqBefore = boardEl.querySelector('.sq[data-r="' + lastMove.to.r + '"][data-c="' + lastMove.to.c + '"]');
         const capturedPieceEl = toSqBefore ? toSqBefore.querySelector('.piece') : null;
