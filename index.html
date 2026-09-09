@@ -7695,6 +7695,7 @@
   // who owns which colours changes, which is exactly what the mode table
   // describes. Narrowing below the number of seated players is refused: that
   // would leave somebody without a seat in the middle of a game.
+  let lastModeChangeAt = 0;
   async function changeOnlineMode(newMode){
     if(!onlineRoomId || !newMode || newMode === mode || gameOver) return;
     const filled = Object.values(onlinePlayers).filter(Boolean).length;
@@ -7703,9 +7704,13 @@
       appendChatMessage(t('systemLabel'), t('modeTooSmallMsg'), true);
       return;
     }
+    lastModeChangeAt = Date.now();
     mode = newMode;
     onlineMaxPlayers = newMax;
     updateOwnerForMode();
+    // Make sure the seats exist as keys, so openSeatsInRoom sees them as free
+    // rather than simply absent.
+    for(let i = 1; i <= newMax; i++){ const k = 'p' + i; if(!(k in onlinePlayers)) onlinePlayers[k] = null; }
     render(); updateStatus(); updateOnlineBar();
     appendChatMessage(t('systemLabel'), t('modeChangedMsg') + ' ' + modeLabelFor(mode), true);
     await pushRoomState(null);
@@ -7713,13 +7718,31 @@
 
   async function invitePlayer(targetNick){
     const wantedMax = maxPlayersForMode(mode);
-    // already sitting in a room that's still being formed (3-4 player game
-    // not full yet) — invite this friend into ITS next open seat instead of
-    // starting an unrelated second room
-    if(onlineRoomId && onlineMaxPlayers > 1){
-      const filled = Object.values(onlinePlayers).filter(Boolean).length;
-      if(filled < onlineMaxPlayers) return inviteReplacementIntoRoom(targetNick);
+    // Already sitting in a room with a free seat — invite into THAT seat
+    // instead of starting an unrelated second room.
+    //
+    // The decision is taken from the room record itself, not from the local
+    // onlineMaxPlayers/onlinePlayers copies. Those can lag: right after the
+    // mode is widened mid-game, a state push from the other player that was
+    // already in flight carries the OLD mode and puts the local copy back to
+    // two seats — and then this check said "room is full" and quietly created
+    // a brand new room, which is exactly the reported behaviour. The room
+    // record is the authority.
+    if(onlineRoomId){
+      try{
+        const raw = await storeGet('room:' + onlineRoomId, true);
+        if(raw){
+          const room = JSON.parse(raw);
+          const maxP = room.maxPlayers || onlineMaxPlayers || 2;
+          const open = openSeatsInRoom(room.players || {}, maxP);
+          vlog('ПРИГЛАШЕНИЕ: комната ' + onlineRoomId + ', мест ' + maxP +
+               ', занято ' + Object.values(room.players || {}).filter(Boolean).length +
+               ', свободно ' + open.length);
+          if(open.length > 0) return inviteReplacementIntoRoom(targetNick);
+        }
+      }catch(e){ vlog('ПРИГЛАШЕНИЕ: не удалось прочитать комнату — ' + (e && e.message)); }
     }
+    vlog('ПРИГЛАШЕНИЕ: создаю новую комнату, режим ' + mode);
     const roomId = uid();
     await storeSet('room:' + roomId, JSON.stringify({
       mode: mode, maxPlayers: wantedMax, players:{p1:myNick}, status: wantedMax > 1 ? 'waiting' : 'active',
@@ -8762,10 +8785,20 @@
     // Without this the player who switched saw one thing while everyone else
     // kept playing by the old seat mapping.
     if(room.mode && room.mode !== mode){
-      mode = room.mode;
-      onlineMaxPlayers = room.maxPlayers || maxPlayersForMode(mode);
-      updateOwnerForMode();
-      appendChatMessage(t('systemLabel'), t('modeChangedMsg') + ' ' + modeLabelFor(mode), true);
+      // A payload already in flight when the mode was switched still carries
+      // the old one, and applying it would silently undo the change a second
+      // after it was made. Anything arriving within a few seconds of our own
+      // switch is treated as stale and ignored; the other side will send the
+      // new mode back on its next push.
+      const justSwitched = (Date.now() - lastModeChangeAt) < 5000;
+      if(!justSwitched){
+        mode = room.mode;
+        onlineMaxPlayers = room.maxPlayers || maxPlayersForMode(mode);
+        updateOwnerForMode();
+        appendChatMessage(t('systemLabel'), t('modeChangedMsg') + ' ' + modeLabelFor(mode), true);
+      } else {
+        vlog('РЕЖИМ: пришла устаревшая посылка с ' + room.mode + ' — игнорирую');
+      }
     } else if(room.maxPlayers && room.maxPlayers !== onlineMaxPlayers){
       onlineMaxPlayers = room.maxPlayers;
     }
