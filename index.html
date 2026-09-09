@@ -2872,11 +2872,12 @@
   //   - a full board is sent anyway every SYNC_KEYFRAME_EVERY pushes, when the
   //     diff is large, and while the room is not yet full.
   // Set SYNC_DELTA_ENABLED to false to go back to sending the full board.
-  // OFF by default. The delta path shipped with two faults that jammed live
-  // rooms (see the notes on baseSeq and on the resync answer below). Both are
-  // fixed now, but it stays off until it has been tested on two real devices.
-  // Flip to true only after that.
-  const SYNC_DELTA_ENABLED = false;
+  // ON. It shipped once with two faults that jammed live rooms: the receiver
+  // gated on a sequence number that other code bumped behind its back, and a
+  // resync request nobody was allowed to answer. Both are fixed — the hash is
+  // the authority now, and any client holding a real position answers a
+  // request. Set to false to go straight back to sending the whole board.
+  const SYNC_DELTA_ENABLED = true;
   const SYNC_KEYFRAME_EVERY = 8;   // full board at least this often
   // A captured king hands over a whole army, which can be ~16 squares at the
   // start of a game and more once pieces have been absorbed twice. Keep the
@@ -8219,13 +8220,29 @@
 
   let roomPresenceInterval = null, opponentCheckInterval = null, opponentDisconnectDeclared = false;
   let opponentReconnectingSince = null;
+  // No ts on purpose: with no heartbeat a timestamp would only grow stale and
+  // make a perfectly connected player look gone. Presence is now membership,
+  // and absence is either the server-set 'disconnected' flag or the record
+  // being missing altogether.
+  function writeMyRoomPresence(){
+    if(!onlineRoomId || !STORAGE_OK || !fbDb || !myNick) return;
+    try{
+      const ref = fbDb.ref(fbPath('room-presence:' + onlineRoomId + ':' + myNick));
+      ref.onDisconnect().set(JSON.stringify({disconnected:true, ts:Date.now()}));
+      ref.set(JSON.stringify({online:true}));
+    }catch(e){}
+  }
+
   function startRoomPresence(){
     stopRoomPresence();
     opponentDisconnectDeclared = false;
     opponentReconnectingSince = null;
-    const beat = ()=>{ if(onlineRoomId) storeSet('room-presence:' + onlineRoomId + ':' + myNick, JSON.stringify({ts:Date.now()}), true); };
-    beat();
-    roomPresenceInterval = setInterval(beat, 15000);
+    // Written once and then left alone, like the global presence record. The
+    // 15-second heartbeat is gone: every beat was pushed to every listener in
+    // the room, and the record has to stay unchanged for the subscription to
+    // cost nothing. Departure is reported by the server through onDisconnect
+    // (see the connection watcher), not by a timer noticing silence.
+    writeMyRoomPresence();
     // One subscription feeds the local copy; the check below reads it without
     // touching the network.
     startRoomPresenceListener(onlineRoomId);
@@ -8307,8 +8324,10 @@
     if(raw){
       delete absentSince[nick];
       let data; try{ data = JSON.parse(raw); }catch(e){ return 0; }
-      // the onDisconnect-set flag is server-confirmed: trust it at once
-      return data.disconnected ? Infinity : (Date.now() - data.ts);
+      // Present and not flagged means connected. Ageing by ts would be wrong
+      // now that nothing refreshes it — a quiet but healthy player would drift
+      // past the threshold and be declared gone after 45 seconds.
+      return data.disconnected ? Infinity : 0;
     }
     if(!absentSince[nick]) absentSince[nick] = Date.now();
     return Date.now() - absentSince[nick];
@@ -9113,14 +9132,13 @@
           }catch(e){}
         }, 1500);
       }
-      // re-register the onDisconnect hook every time a connection is
-      // (re)established — Firebase clears these on each disconnect, so
-      // this must run again on every reconnect, not just once
+      // Re-arm the onDisconnect hook on every reconnect — Firebase clears them
+      // on each disconnect — AND rewrite the record itself. The server already
+      // replaced it with {disconnected:true} when the socket dropped, so
+      // without this the player stays marked as gone to everyone for the rest
+      // of the game, no matter that they are back.
       if(connected && onlineRoomId && myNick){
-        try{
-          fbDb.ref(fbPath('room-presence:' + onlineRoomId + ':' + myNick))
-            .onDisconnect().set(JSON.stringify({disconnected:true, ts:Date.now()}));
-        }catch(e){}
+        writeMyRoomPresence();
       }
     });
   }
