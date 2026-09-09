@@ -7931,19 +7931,29 @@
       // brand new 1-on-1 game, so an existing connection/voice call gets
       // reused instead of anyone having to reconnect, and multiplayer
       // rooms actually get filled
-      const replacementCandidates = queue.filter(q => q.type === 'replacement');
+      // EVERY match is now filtered by mode. Plain 1-on-1 entries used to be
+      // written with no mode at all and picked with no mode check, and free
+      // seats in other rooms were taken regardless — so someone looking for a
+      // game of two could be dropped into a four-player room, and two people
+      // both waiting for the same mode could be paired into something neither
+      // had chosen. Entries older than this change carry no mode and simply
+      // never match; they expire from the queue within a minute anyway.
+      const replacementCandidates = queue.filter(q => q.type === 'replacement' && q.mode === mode);
       if(replacementCandidates.length > 0){
         pickedReplacement = replacementCandidates[0];
         queue = queue.filter(q => q !== pickedReplacement);
       } else {
-        let candidates = queue.filter(q => q.lang === currentLang && !q.type);
-        if(candidates.length === 0) candidates = queue.filter(q => !q.type);
+        // Same mode is required; same interface language is only a preference,
+        // so it is tried first and then dropped.
+        const sameMode = queue.filter(q => !q.type && q.mode === mode);
+        let candidates = sameMode.filter(q => q.lang === currentLang);
+        if(candidates.length === 0) candidates = sameMode;
         if(candidates.length > 0){
           pickedOpponent = candidates[0];
           queue = queue.filter(q => q.nick !== pickedOpponent.nick);
         } else {
           pickedOpponent = null;
-          queue.push({nick:myNick, ts:Date.now(), lang:currentLang});
+          queue.push({nick:myNick, mode, ts:Date.now(), lang:currentLang});
         }
       }
       return JSON.stringify(queue);
@@ -7979,7 +7989,7 @@
             let queue = [];
             if(raw){ try{ queue = JSON.parse(raw); }catch(e){} }
             queue = queue.filter(q => Date.now() - q.ts < 60000);
-            queue.push({type:'replacement', roomId: pickedReplacement.roomId, seat: stillOpen[0], ts: Date.now(), lang: currentLang});
+            queue.push({type:'replacement', mode, roomId: pickedReplacement.roomId, seat: stillOpen[0], ts: Date.now(), lang: currentLang});
             return JSON.stringify(queue);
           }, true);
         }
@@ -8023,7 +8033,7 @@
       let queue = [];
       if(raw){ try{ queue = JSON.parse(raw); }catch(e){} }
       queue = queue.filter(q => Date.now() - q.ts < 60000);
-      queue.push({type:'replacement', roomId: onlineRoomId, seat, ts: Date.now(), lang: currentLang});
+      queue.push({type:'replacement', mode, roomId: onlineRoomId, seat, ts: Date.now(), lang: currentLang});
       return JSON.stringify(queue);
     }, true);
   }
