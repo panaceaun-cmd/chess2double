@@ -9066,7 +9066,7 @@
           voiceRecoveryTimer = null;
           try{
             if(voiceActive && (!voicePeerConnection || voicePeerConnection.connectionState !== 'connected')){
-              establishVoicePeerConnection();
+              requestVoiceRenegotiation();
             }
             // Group voice holds one peer connection per seat; rebuild only the
             // ones that are not connected, so a partial outage does not tear
@@ -10369,6 +10369,50 @@
 
   let voiceReconnectTimer = null;
   let voiceDisconnectedSince = null; // timestamp of the first disconnect in the current retry streak
+
+  // Renegotiation has to happen on BOTH sides at once. Only p1 ever creates an
+  // offer, and each side ignores an incoming description once its own peer
+  // connection already has one:
+  //     if(... voicePeerConnection.currentRemoteDescription) return;
+  // So a side that rebuilds alone talks to a partner still holding the dead
+  // connection, and its fresh offer or answer is thrown away — which is why
+  // voice never came back after a drop, no matter who retried.
+  //
+  // 'epoch' is a shared value both sides watch. Whoever notices the break
+  // bumps it; the change reaches the other side and both rebuild together.
+  let voiceEpochRef = null;
+  let lastVoiceEpoch = null;
+  let lastVoiceRebuildAt = 0;
+  function startVoiceEpochListener(){
+    if(!fbDb || !onlineRoomId || voiceEpochRef) return;
+    voiceEpochRef = fbDb.ref(vPath('epoch'));
+    voiceEpochRef.on('value', (snap) => {
+      const v = snap.val();
+      if(!v || v === lastVoiceEpoch) return;      // our own bump, or nothing new
+      lastVoiceEpoch = v;
+      if(!voiceActive) return;
+      // Guard against the two sides bouncing rebuilds off each other when both
+      // notice the break at the same moment.
+      if(Date.now() - lastVoiceRebuildAt < 3000) return;
+      lastVoiceRebuildAt = Date.now();
+      establishVoicePeerConnection();
+    });
+  }
+  function stopVoiceEpochListener(){
+    if(voiceEpochRef){ try{ voiceEpochRef.off(); }catch(e){} voiceEpochRef = null; }
+    lastVoiceEpoch = null;
+  }
+  // Ask both sides to start over. Sets the value locally first, so our own
+  // write does not come back and trigger us a second time.
+  function requestVoiceRenegotiation(){
+    if(!voiceActive || !onlineRoomId || !fbDb) return;
+    if(Date.now() - lastVoiceRebuildAt < 3000) return;
+    lastVoiceRebuildAt = Date.now();
+    const v = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    lastVoiceEpoch = v;
+    try{ fbDb.ref(vPath('epoch')).set(v); }catch(e){}
+    establishVoicePeerConnection();
+  }
   async function startVoiceChatInternal(){
     if(!onlineRoomId || !STORAGE_OK || voiceActive) return;
     if(typeof RTCPeerConnection === 'undefined' || !window.crypto || !window.crypto.subtle) return;
@@ -10384,6 +10428,7 @@
     voiceActive = true;
     updateVoiceChatButton();
     updatePttHoldButtonVisibility();
+    startVoiceEpochListener();
     establishVoicePeerConnection();
   }
 
@@ -10464,7 +10509,9 @@
           if(!voiceActive || !voicePeerConnection) return;
           const stNow = voicePeerConnection.connectionState;
           if(stNow === 'disconnected' || stNow === 'failed'){
-            establishVoicePeerConnection();
+            // Rebuilding only here would leave the other side on its old
+            // connection, silently discarding whatever we send.
+            requestVoiceRenegotiation();
           }
         }, 3000);
       }
@@ -10567,6 +10614,7 @@
     updatePttHoldButtonVisibility();
     if(voiceReconnectTimer){ clearTimeout(voiceReconnectTimer); voiceReconnectTimer = null; }
     voiceDisconnectedSince = null;
+    stopVoiceEpochListener();
     const statusEl = document.getElementById('voice-chat-status');
     if(statusEl) statusEl.textContent = '';
     const diagEl = document.getElementById('voice-chat-diag');
