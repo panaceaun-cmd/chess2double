@@ -8204,6 +8204,7 @@
     startTimerLoop();
     updateOnlineBar();
     startRoomPresence();
+    startMoveChannels();
 
     document.getElementById('mode-select').style.opacity = '.5';
     document.getElementById('mode-select').style.pointerEvents = 'none';
@@ -8252,6 +8253,7 @@
   let opponentReconnectingSince = null;
   function startRoomPresence(){
     stopRoomPresence();
+    stopMoveChannels();
     opponentDisconnectDeclared = false;
     opponentReconnectingSince = null;
     // Reverted to the heartbeat. Dropping it moved the whole judgement of "is
@@ -8865,6 +8867,11 @@
     const seatSignature = Object.keys(onlinePlayers).sort()
       .map(k => k + '=' + (onlinePlayers[k] || '')).join(',');
     const membershipChanged = (seatSignature !== lastSentSeatSignature);
+    if(membershipChanged && lastSentSeatSignature !== null){
+      // Somebody joined or left: the set of peers to talk to changed, so the
+      // channels are rebuilt for the new line-up.
+      startMoveChannels();
+    }
     lastSentSeatSignature = seatSignature;
     const roomFull = Object.keys(onlinePlayers).length >= (onlineMaxPlayers || 2)
                      && Object.values(onlinePlayers).every(v => v);
@@ -8897,7 +8904,27 @@
     const sendSettings = (payload.board !== undefined) || settingsJson !== lastSentSettings;
     if(sendSettings) Object.assign(payload, settings);
 
-    const ok = await storeSet('room:' + onlineRoomId, JSON.stringify(payload), true);
+    const json = JSON.stringify(payload);
+
+    // Fast path: straight to the other players. Firebase is written anyway when
+    // anything is uncertain, so the room record never falls behind in a way
+    // that could strand a newcomer:
+    //   - a peer's channel is not open  -> that player would miss the move
+    //   - the seats changed             -> somebody just arrived or left
+    //   - the game ended or paused      -> state everyone must be able to read
+    //   - every FIREBASE_WRITE_EVERY    -> a periodic snapshot regardless
+    const deliveredToAll = sendMoveOverChannels(json);
+    sinceFirebaseWrite += 1;
+    const mustWriteFirebase = !deliveredToAll || membershipChanged ||
+      gameOver || payload.status !== 'active' ||
+      sinceFirebaseWrite >= FIREBASE_WRITE_EVERY;
+    if(!mustWriteFirebase){
+      lastSentBoard = cloneBoard(board);
+      lastAppliedSeq = onlineMoveSeq;
+      return true;
+    }
+    sinceFirebaseWrite = 0;
+    const ok = await storeSet('room:' + onlineRoomId, json, true);
     // Only trust the diff base once the write actually went out. Our own push
     // is also the state everyone else's next diff will be built on, so it
     // counts as "applied" here too.
@@ -9398,6 +9425,7 @@
     if(multiRoomWaitTimer) clearInterval(multiRoomWaitTimer);
     stopRoomStateListener();
     stopRoomPresence();
+    stopMoveChannels();
     stopFileShareListener();
     if(fbDb && onlineRoomId && (voiceActive || voiceCallState)){
       try{ fbDb.ref(vCallStatePath()).set(JSON.stringify({state:'ended', caller:onlineSide})); }catch(e){}
@@ -11005,6 +11033,127 @@
   let groupVoiceFbRefs = {};
 
   function pairKeyFor(seatA, seatB){ return [seatA, seatB].sort().join('-'); }
+
+  // ===== MOVES OVER WebRTC =====
+  //
+  // Moves travel straight between players over a data channel; Firebase keeps
+  // only a periodic snapshot. That is what removes ~92% of the paid traffic.
+  //
+  // The one hard rule, learned from the delta-sync attempts that broke live
+  // games three times: WHAT TRAVELS IS ALWAYS THE COMPLETE STATE, never a
+  // change to be applied on top of something. Any single payload — from the
+  // channel or from Firebase — fully defines the position. So a player who
+  // joins, reconnects, or misses ten messages is never left reconstructing
+  // anything; the next payload they receive puts them exactly right.
+  //
+  // Firebase is still written on a slower cadence, so the room record always
+  // holds a real, complete, recent board for anyone who arrives.
+  const MOVE_CHANNEL_ENABLED = false;   // flip to true after testing on two devices
+  const FIREBASE_WRITE_EVERY = 5;       // snapshot at least this often
+  let movePeers = {};      // seat -> RTCPeerConnection
+  let moveChannels = {};   // seat -> RTCDataChannel
+  let moveFbRefs = [];
+  let sinceFirebaseWrite = 0;
+
+  function mvPath(otherSeat, suffix){
+    return 'file-signal/' + onlineRoomId + '/' + pairKeyFor(onlineSide, otherSeat) + '/mv-' + suffix;
+  }
+  function moveSeats(){
+    return Object.keys(onlinePlayers).filter(s => s !== onlineSide && onlinePlayers[s]);
+  }
+  function wireMoveChannel(seat, ch){
+    moveChannels[seat] = ch;
+    ch.onopen = () => vlog('ХОДЫ: канал с ' + seat + ' открыт');
+    ch.onclose = () => { vlog('ХОДЫ: канал с ' + seat + ' закрыт'); delete moveChannels[seat]; };
+    ch.onmessage = (ev) => {
+      let room; try{ room = JSON.parse(ev.data); }catch(e){ return; }
+      // Same guard the Firebase listener uses, so the two paths converge
+      // whichever arrives first.
+      if((room.moveSeq || 0) <= onlineMoveSeq) return;
+      onlineMoveSeq = room.moveSeq;
+      applyRemoteState(room);
+    };
+  }
+  function establishMoveChannel(otherSeat){
+    if(!MOVE_CHANNEL_ENABLED || !onlineRoomId || !fbDb || !onlineSide) return;
+    try{ if(movePeers[otherSeat]) movePeers[otherSeat].close(); }catch(e){}
+    const pc = new RTCPeerConnection(RTC_CONFIG);
+    movePeers[otherSeat] = pc;
+    // Deterministic roles: the alphabetically smaller seat makes the offer, so
+    // the two sides never both offer and never both wait.
+    const iOffer = onlineSide < otherSeat;
+    pc.onicecandidate = (e) => {
+      if(e.candidate) try{ fbDb.ref(mvPath(otherSeat, 'cand-' + onlineSide)).push(JSON.stringify(e.candidate)); }catch(x){}
+    };
+    if(iOffer){
+      wireMoveChannel(otherSeat, pc.createDataChannel('moves'));
+    } else {
+      pc.ondatachannel = (e) => wireMoveChannel(otherSeat, e.channel);
+    }
+    const offerRef = fbDb.ref(mvPath(otherSeat, 'offer'));
+    const answerRef = fbDb.ref(mvPath(otherSeat, 'answer'));
+    const candRef = fbDb.ref(mvPath(otherSeat, 'cand-' + otherSeat));
+    (async () => {
+      try{
+        if(iOffer){
+          await offerRef.remove(); await answerRef.remove();
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          await offerRef.set(JSON.stringify(offer));
+          answerRef.on('value', async (snap) => {
+            const raw = snap.val();
+            if(!raw || pc.currentRemoteDescription) return;
+            try{ await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(raw))); }catch(e){}
+          });
+          moveFbRefs.push(answerRef);
+        } else {
+          offerRef.on('value', async (snap) => {
+            const raw = snap.val();
+            if(!raw || pc.currentRemoteDescription) return;
+            try{
+              await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(raw)));
+              const ans = await pc.createAnswer();
+              await pc.setLocalDescription(ans);
+              await answerRef.set(JSON.stringify(ans));
+            }catch(e){}
+          });
+          moveFbRefs.push(offerRef);
+        }
+        candRef.on('child_added', async (snap) => {
+          try{ await pc.addIceCandidate(new RTCIceCandidate(JSON.parse(snap.val()))); }catch(e){}
+        });
+        moveFbRefs.push(candRef);
+      }catch(e){ vlog('ХОДЫ: не удалось поднять канал с ' + otherSeat + ' — ' + (e && e.message)); }
+    })();
+  }
+  function startMoveChannels(){
+    if(!MOVE_CHANNEL_ENABLED) return;
+    stopMoveChannels();
+    moveSeats().forEach(establishMoveChannel);
+  }
+  function stopMoveChannels(){
+    moveFbRefs.forEach(r => { try{ r.off(); }catch(e){} });
+    moveFbRefs = [];
+    Object.values(moveChannels).forEach(c => { try{ c.close(); }catch(e){} });
+    Object.values(movePeers).forEach(p => { try{ p.close(); }catch(e){} });
+    moveChannels = {}; movePeers = {};
+  }
+  // Returns true only if EVERY expected peer got it. Anything less and the
+  // state must go through Firebase, or somebody is left behind.
+  function sendMoveOverChannels(json){
+    if(!MOVE_CHANNEL_ENABLED) return false;
+    const seats = moveSeats();
+    if(!seats.length) return false;
+    let all = true;
+    for(const seat of seats){
+      const ch = moveChannels[seat];
+      if(ch && ch.readyState === 'open'){
+        try{ ch.send(json); }catch(e){ all = false; }
+      } else { all = false; }
+    }
+    return all;
+  }
+  // ===== END MOVES OVER WebRTC =====
   function groupVoicePairPath(otherSeat, suffix){
     return 'voice-signal/' + onlineRoomId + '/' + pairKeyFor(onlineSide, otherSeat) + '/' + suffix;
   }
