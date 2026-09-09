@@ -2191,7 +2191,13 @@
         <div class="voice-chat-row">
           <button type="button" class="btn" id="voice-chat-btn" style="display:none; font-size:15px; padding:12px 20px; font-weight:700;">🔇 Говорить с игроками онлайн</button>
           <span id="voice-chat-status"></span>
-          <span id="voice-chat-diag" style="display:block; font-size:10px; color:var(--ink-dim); opacity:.8; margin-top:2px;"></span>
+          <div id="voice-log-box" style="display:none; margin-top:6px; border:1px solid var(--brass); border-radius:8px; padding:6px; background:rgba(0,0,0,.35);">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:4px;">
+              <b style="font-size:11px; color:var(--brass);">Журнал связи</b>
+              <button type="button" id="voice-log-copy" class="btn small" style="font-size:11px; padding:2px 8px;">Копировать</button>
+            </div>
+            <span id="voice-chat-diag" style="display:block; font-size:11px; line-height:1.35; color:#e8e0d0; font-family:monospace;"></span>
+          </div>
         </div>
         <div class="voice-chat-row" id="ptt-toggle-row" style="display:none; align-items:center; gap:6px; font-size:12.5px; flex-wrap:wrap;">
           <input type="checkbox" id="ptt-mode-toggle-2">
@@ -7476,6 +7482,7 @@
   // default: only the count and your friends are shown, and the full list is
   // fetched on demand when you tap the number.
   let onlineListExpanded = false;
+  let onlineRenderToken = 0;
   let lastOnlineNicks = [];
   // "Now playing: N — show everyone / show friends". Tapping it flips the list
   // and pulls a fresh snapshot straight away, so the full list is downloaded
@@ -7499,6 +7506,15 @@
   async function refreshOnlinePlayers(){ return renderOnlineFromCache(); }
   async function renderOnlineFromCache(){
     if(!STORAGE_OK || !myNick) return;
+    // Guard against overlapping renders. This function awaits friends, stats
+    // and avatars inside its loop, so two presence events arriving close
+    // together used to run it twice at once: both cleared the list, then both
+    // appended their rows — which is why players showed up doubled, and why
+    // "nobody is online" could sit above a list of people.
+    const myRender = ++onlineRenderToken;
+    // The count covers everyone present, this player included; the rows below
+    // list the others, since there is no point offering to invite yourself.
+    const total = Object.keys(onlinePresence).length + (onlinePresence[myNick] ? 0 : 1);
     const nicks = Object.keys(onlinePresence)
       .filter(n => n !== myNick)
       .map(n => ({ nick: n, lang: onlinePresence[n].lang, flag: onlinePresence[n].flag }));
@@ -7509,7 +7525,8 @@
     const friends = await getFriends();
     const friendSet = new Set(Array.isArray(friends) ? friends : []);
     const shown = onlineListExpanded ? nicks : nicks.filter(n => friendSet.has(n.nick));
-    renderOnlineCounter(nicks.length);
+    if(myRender !== onlineRenderToken) return;
+    renderOnlineCounter(total);
     if(nicks.length===0){
       wrap.innerHTML = '<div class="no-players">' + escapeHtml(t('noPlayersMsg')) + '</div>';
       return;
@@ -7522,6 +7539,9 @@
     for(const {nick, lang, flag:countryCode} of shown){
       const stats = await getStats(nick);
       const avatarRaw = await getAvatarCached(nick);
+      // A newer render started while we were awaiting — stop, or our rows land
+      // in a list that now belongs to someone else and appear twice.
+      if(myRender !== onlineRenderToken) return;
       const row = document.createElement('div');
       row.className = 'player-row';
       const avImg = avatarRaw ? '<img class="p-avatar" src="' + avatarRaw + '" alt="">' : '';
@@ -10419,7 +10439,7 @@
       // notice the break at the same moment.
       if(Date.now() - lastVoiceRebuildAt < 6000) return;
       lastVoiceRebuildAt = Date.now();
-      restartVoiceChat();
+      restartVoiceChat(false);
     });
   }
   // Every recovery path so far hung on an EVENT arriving: a connection state
@@ -10472,13 +10492,39 @@
   // is therefore written FIRST and restored right after the teardown, and the
   // 'ended' call state is suppressed for the duration.
   let voiceRestarting = false;
-  async function restartVoiceChat(){
+  // initiator=true only for the side that noticed the break and wrote the
+  // epoch. The side reacting to the epoch must NOT clear the record: the
+  // initiator may already have published a fresh offer there, and wiping it
+  // leaves the reacting side with nothing to answer.
+  async function restartVoiceChat(initiator){
     if(voiceRestarting || !voiceActive || !onlineRoomId || !fbDb) return;
     voiceRestarting = true;
-    vlog('ПЕРЕЗАПУСК: выключаю связь');
+    vlog('ПЕРЕЗАПУСК: чищу старое согласование');
     const statusEl = document.getElementById('voice-chat-status');
     if(statusEl) statusEl.textContent = t('voiceChatReconnecting');
     try{
+      // Wipe the stale offer/answer BEFORE anything restarts, and do it from
+      // whichever side noticed the break.
+      //
+      // Only p1 ever publishes an offer, and only p1 clears the old one — from
+      // inside establishVoicePeerConnection(). So if p2 happened to restart
+      // first, its fresh peer connection immediately read the offer still
+      // sitting in the database from the dead call, set it as the remote
+      // description and answered it. A moment later p1 published a new offer,
+      // which p2 then discarded because its connection already had one:
+      //     if(... voicePeerConnection.currentRemoteDescription) return;
+      // p2 was left stuck for good, while p1 looked fine — exactly the
+      // asymmetry seen on the two devices. With the record cleared first,
+      // there is no stale offer for anyone to latch onto.
+      if(initiator){
+        const other = onlineSide === 'p1' ? 'p2' : 'p1';
+        const pairBase = 'voice-signal/' + onlineRoomId + '/' + pairKeyFor(onlineSide, other) + '/';
+        await Promise.all(['offer','answer','candidates-p1','candidates-p2']
+          .map(k => fbDb.ref(pairBase + k).remove().catch(() => {})));
+      } else {
+        vlog('ПЕРЕЗАПУСК: по метке, чужое согласование не трогаю');
+      }
+      vlog('ПЕРЕЗАПУСК: выключаю связь');
       stopVoiceChatInternal();
       // Let the wipe land before the fresh signaling starts writing, or the
       // new offer can be deleted a moment after it is published.
@@ -10505,7 +10551,7 @@
     lastVoiceEpoch = v;
     // Written outside the pair node so the teardown below cannot erase it.
     try{ fbDb.ref('voice-signal/' + onlineRoomId + '/restart').set(v); }catch(e){}
-    restartVoiceChat();
+    restartVoiceChat(true);
   }
   async function startVoiceChatInternal(){
     if(!onlineRoomId || !STORAGE_OK || voiceActive) return;
@@ -10664,7 +10710,16 @@
       } else {
         offerRef.on('value', async (snap) => {
           const raw = snap.val();
-          if(!raw || !voicePeerConnection || voicePeerConnection.currentRemoteDescription) return;
+          if(!raw || !voicePeerConnection) return;
+          // Second line of defence for the same race: if an offer arrives for a
+          // connection that has already been answered, this one is newer than
+          // ours, and silently ignoring it is what left p2 deaf. Rebuild
+          // instead of discarding.
+          if(voicePeerConnection.currentRemoteDescription){
+            vlog('пришло новое предложение поверх старого — пересобираю');
+            establishVoicePeerConnection();
+            return;
+          }
           try{
             const decrypted = await decryptVoiceSignal(roomId, raw);
             await voicePeerConnection.setRemoteDescription(new RTCSessionDescription(JSON.parse(decrypted)));
@@ -10706,6 +10761,16 @@
   // reasoning was done without ever seeing what the code actually does on a
   // real device. This records the sequence so it can simply be read off the
   // screen: connection states, restart requests, epoch traffic, errors.
+  function fallbackCopy(text, done){
+    try{
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      if(done) done();
+    }catch(e){}
+  }
   const VOICE_LOG_MAX = 40;
   let voiceLog = [];
   function vlog(msg){
@@ -10714,6 +10779,23 @@
                   String(t0.getSeconds()).padStart(2,'0');
     voiceLog.push(stamp + ' ' + msg);
     if(voiceLog.length > VOICE_LOG_MAX) voiceLog = voiceLog.slice(-VOICE_LOG_MAX);
+    const box = document.getElementById('voice-log-box');
+    if(box && box.style.display === 'none'){
+      box.style.display = 'block';
+      const btn = document.getElementById('voice-log-copy');
+      if(btn && !btn.dataset.wired){
+        btn.dataset.wired = '1';
+        btn.addEventListener('click', () => {
+          const text = voiceLog.join('\n');
+          // Clipboard API needs https or localhost; the textarea fallback works
+          // everywhere, including the file:// and http cases.
+          const done = () => { btn.textContent = 'Скопировано'; setTimeout(() => { btn.textContent = 'Копировать'; }, 1500); };
+          if(navigator.clipboard && navigator.clipboard.writeText){
+            navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+          } else { fallbackCopy(text, done); }
+        });
+      }
+    }
     const diag = document.getElementById('voice-chat-diag');
     if(diag){
       diag.style.whiteSpace = 'pre-wrap';
