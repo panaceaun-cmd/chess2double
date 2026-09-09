@@ -7359,16 +7359,19 @@
     presenceListRef.on('child_added', (snap) => {
       onlinePresence[snap.key] = parse(snap.val());
       renderOnlineFromCache();
+      renderFriendsList();   // the green dot lives here too
     });
     presenceListRef.on('child_removed', (snap) => {
       delete onlinePresence[snap.key];
       renderOnlineFromCache();
+      renderFriendsList();   // the green dot lives here too
     });
     // Only fires when somebody deliberately changes their own flag or
     // language, which is rare — this is not a heartbeat.
     presenceListRef.on('child_changed', (snap) => {
       onlinePresence[snap.key] = parse(snap.val());
       renderOnlineFromCache();
+      renderFriendsList();   // the green dot lives here too
     });
   }
   function stopPresenceListener(){
@@ -7434,13 +7437,16 @@
       return;
     }
     wrap.innerHTML = '';
-    const now = Date.now();
     for(const nick of friends){
-      let isOnline = false;
-      try{
-        const raw = await storeGet('presence:' + nick, true);
-        if(raw){ const data = JSON.parse(raw); isOnline = (now - data.ts) < 25000; }
-      }catch(e){}
+      // Was: read presence:<nick> from the database and compare its ts against
+      // 25 seconds. The presence record no longer carries a ts — it is written
+      // once and removed by onDisconnect — so "now - undefined" was NaN, the
+      // comparison was always false, and every friend looked offline. That in
+      // turn disabled the invite and call buttons below, which is why pressing
+      // the handset did nothing at all and logged nothing: a disabled button
+      // fires no click. Presence membership is the answer now, and it costs no
+      // database read at all.
+      const isOnline = !!onlinePresence[nick];
       const row = document.createElement('div');
       row.className = 'friend-row';
       const nameWrap = document.createElement('div');
