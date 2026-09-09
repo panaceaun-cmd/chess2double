@@ -3405,6 +3405,15 @@
         currentPuzzle = null;
         document.getElementById('puzzle-selector-panel').classList.remove('show');
         if(mode===m) return;
+        // In an online game the same cards change the mode of the game in
+        // progress instead of throwing the board away and starting a new one.
+        // Widening frees seats, and the invite buttons then route into this
+        // room rather than creating another.
+        if(onlineRoomId && !gameOver){
+          changeOnlineMode(m).then(() => { renderModeMenu(); populateChatSenders();
+            try{ updateTeamVoiceRow(); }catch(e){} });
+          return;
+        }
         mode = m;
         renderModeMenu();
         populateChatSenders();
@@ -7702,6 +7711,9 @@
     const newMax = maxPlayersForMode(newMode);
     if(newMax < filled){
       appendChatMessage(t('systemLabel'), t('modeTooSmallMsg'), true);
+      // The cards are redrawn from `mode`, so a refused switch leaves the old
+      // one highlighted rather than the card the player just pressed.
+      renderModeMenu();
       return;
     }
     lastModeChangeAt = Date.now();
@@ -9251,23 +9263,9 @@
 
     bar.innerHTML = '<div id="online-game-bar-players">' + rowsHtml + '</div>' +
       '<div class="ogb-row">' + escapeHtml(t('youArePrefix')) + ' <b>' + escapeHtml(myColors) + '</b></div>' +
-      '<div id="online-game-bar-actions">' +
-        '<select id="ogb-mode-select" class="btn secondary small" style="padding:4px 6px;">' +
-          ['2p','3p','4p','ffa'].map(m =>
-            '<option value="' + m + '"' + (m === mode ? ' selected' : '') + '>' +
-            escapeHtml(modeLabelFor(m)) + '</option>').join('') +
-        '</select>' +
-        '<button class="btn secondary small" id="leave-online-btn">' + escapeHtml(t('leaveBtn')) + '</button>' +
-      '</div>';
+      '<div id="online-game-bar-actions"><button class="btn secondary small" id="leave-online-btn">' + escapeHtml(t('leaveBtn')) + '</button></div>';
 
     document.getElementById('leave-online-btn').addEventListener('click', () => { announceILeft(); offerSaveBeforeLeaving(() => leaveOnlineGame(false)); });
-    const modeSel = document.getElementById('ogb-mode-select');
-    if(modeSel) modeSel.addEventListener('change', () => {
-      // Widening frees seats; the friends list's invite buttons already route
-      // into the current room whenever it is not full, so no separate
-      // "invite a partner" control is needed.
-      changeOnlineMode(modeSel.value);
-    });
     bar.querySelectorAll('.ogb-swap-color').forEach(btn => {
       btn.addEventListener('click', () => proposeSwap(btn.dataset.seat));
     });
