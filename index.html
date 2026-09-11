@@ -2047,19 +2047,24 @@
      the piece upright. Mirroring it instead left the auto-flip view with no
      visible pieces at all. Only face-far — "turn to face the other player" —
      is a mirroring. */
-  #board.board3d .piece.face-far{
-    /* Upside down, as the option promises — but pivoting about the piece's own
-       centre. With the default origin the 180° turn swung the piece a full
-       height downwards, below the board surface, where it was hidden by the
-       board itself: only its shadow stayed visible. */
-    /* Pivot about the piece's own FIGURE, not the middle of its box. A sprite
-       sits at the bottom of a box roughly twice a square tall (the extra room
-       is what lets a standing piece rise above its square), so turning about
-       the box centre lifted the figure a whole square clear of the board. */
-    transform-origin: 50% calc(100% - var(--sq) * 0.55) !important;
+  /* Mirrored, not turned upside down.
+     A standing piece pivots on its base (transform-origin:50% 100%), so a 180°
+     turn swings it below the board surface, where the board hides it — that is
+     what "the pieces disappeared" was, every time. Keeping it in place needs a
+     pivot at the middle of the DRAWN figure inside its box, and the box is
+     taller than the figure by an amount I could not measure without seeing the
+     result. Four attempts at guessing it each broke something, so this stays
+     on the version that is verified to work: face-far mirrors the sprite.
+     To try the upside-down variant, replace scaleX(-1) below with
+     rotate(180deg) and add
+         transform-origin: 50% calc(100% - var(--sq) * K) !important;
+     K nudges the piece: larger K moves it DOWN, smaller moves it UP. Around
+     0.5-1.0 is the useful range. */
+  #board.board3d .piece.piece-vec.face-far,
+  #board.board3d .piece.piece3d.face-far{
     transform: rotateX(var(--piece-stand)) translateY(var(--piece-seat, 0%))
                scale(var(--piece-tilt-scale, 1)) scale(var(--piece-extra-scale, 1))
-               rotate(180deg) !important;
+               scaleX(-1) !important;
   }
 </style>
 </head>
