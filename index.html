@@ -3324,14 +3324,22 @@
     boardTheme = localStorage.getItem('chess2-theme') || 'beige-brown';
     // falls back to the flat-board default; the 3D default is applied by
     // applyViewMode() the first time the tilted board is switched on
-    pieceStyle = parseInt(localStorage.getItem('chess2-pstyle')) || DEFAULT_STYLE_2D;
+    // Which view the game starts in. Declared FIRST: the style default below
+    // depends on it, and a const used above its own declaration throws and
+    // takes the whole script down with it.
+    let started3D = true;
+    try{
+      const savedView3D = localStorage.getItem('chess2-view-3d');
+      if(savedView3D !== null) started3D = (savedView3D === '1');
+    }catch(e){}
+    // With nothing saved the style must match the view the game starts in —
+    // 3D now — or the tilted board would open with flat silhouettes on it.
+    const savedStyle = parseInt(localStorage.getItem('chess2-pstyle'));
+    pieceStyle = savedStyle || (started3D ? DEFAULT_STYLE_3D : DEFAULT_STYLE_2D);
     // The mode the game STARTS in already has its style, so mark it as
     // settled. Without this the very first view switch back would treat that
     // mode as untouched and overwrite a style the player had chosen.
-    // Read from storage rather than view3D: that variable is declared much
-    // further down and is still in its temporal dead zone here.
     try{
-      const started3D = localStorage.getItem('chess2-view-3d') === '1';
       const startKey = started3D ? 'chess2-pstyle-3d-set' : 'chess2-pstyle-2d-set';
       // unconditional: on a brand-new profile the starting mode is already
       // showing its own default, so it counts as settled either way
@@ -3759,7 +3767,10 @@
     // let-binding in its temporal dead zone throws rather than returning
     // "undefined" — so guarding with typeof would not have saved us.
     let is3D = false;
-    try{ is3D = localStorage.getItem('chess2-view-3d') === '1'; }catch(e){}
+    try{
+      const sv = localStorage.getItem('chess2-view-3d');
+      is3D = (sv === null) ? true : (sv === '1');
+    }catch(e){}
     const tiltGutter = is3D ? Math.min(56, Math.max(46, w * 0.09)) : 0;
     const available = Math.max(160, w - 24 - tiltGutter);
     let sq = Math.floor((available - 34) / 16);
@@ -3782,9 +3793,15 @@
     // settled: the first measurement happens before fonts, panels and mobile
     // chrome are final, and on a phone it came out far smaller than what
     // actually fits.
+    // An automatically chosen size is never written to storage. It used to be
+    // saved, and on a phone that measurement happened in PORTRAIT — behind the
+    // "rotate your device" overlay. After rotating, the saved portrait value
+    // was treated as the player's own choice and never recomputed, which is
+    // why the board stayed small in landscape and had to be enlarged by hand
+    // every time. Only the slider saves.
     boardSizeIsAuto = !saved;
     const px = saved ? parseInt(saved) : maxFittingBoardSize();
-    applyBoardSize(px, !saved);
+    applyBoardSize(px, false);
   })();
 
   // ---- piece render style: 5 named design styles ----
@@ -5514,8 +5531,13 @@
     const savedTilt = parseFloat(localStorage.getItem('chess2-board-tilt'));
     if(isFinite(savedTilt)) boardTilt3D = Math.max(TILT_MIN, Math.min(TILT_MAX, savedTilt));
   }catch(e){}
-  let view3D = false;
-  try{ view3D = localStorage.getItem('chess2-view-3d') === '1'; }catch(e){}
+  // 3D by default for a new player; DEFAULT_STYLE_3D (3D Wood) comes with it.
+  // A player who has switched before keeps whatever they chose.
+  let view3D = true;
+  try{
+    const savedView = localStorage.getItem('chess2-view-3d');
+    if(savedView !== null) view3D = (savedView === '1');
+  }catch(e){}
   // Rebuilds the transform string a piece carries when it is sitting still,
   // so move animations can chain their translate onto it instead of wiping
   // it out. Mirrors the .piece rules in the 3D CSS block above.
@@ -13368,6 +13390,10 @@
   // ================= END BOT (ROBOT OPPONENT) =================
 
   function render(){
+    // A resize or an orientation change can reach here before the first game
+    // has been built. Drawing squares from a board that does not exist yet
+    // throws and takes the rest of the script's startup down with it.
+    if(typeof board === 'undefined' || !board || !board.length) return;
     const pauseBtn = document.getElementById('pause-btn');
     if(pauseBtn) updatePttHoldButtonVisibility();
     const boardEl = document.getElementById('board');
@@ -13481,7 +13507,7 @@
           sq.classList.add('selected');
         }
 
-        const piece = board[r][c];
+        const piece = (board && board[r]) ? board[r][c] : null;
         if(piece){
           // Two separate things, previously conflated into one class:
           //  faceFar     — this piece faces the OTHER player on a board that
@@ -15173,6 +15199,16 @@
   window.addEventListener('resize', () => {
     clearTimeout(boardSizeResizeTimer);
     boardSizeResizeTimer = setTimeout(() => applyBoardSize(boardSizeIsAuto ? maxFittingBoardSize() : preferredBoardSizePx, false), 150);
+  });
+  // Rotation does not always fire a resize on mobile, and when it does the new
+  // dimensions are not ready yet — hence the delays.
+  window.addEventListener('orientationchange', () => {
+    [120, 400, 900].forEach(ms => setTimeout(() => {
+      // Nothing to resize before the game has built a board; touching it
+      // earlier drags render() in over an array that does not exist yet.
+      if(typeof gameStarted !== 'undefined' && !gameStarted) return;
+      if(boardSizeIsAuto) applyBoardSize(maxFittingBoardSize(), false);
+    }, ms));
   });
   // Rotating a phone is its own event, not just a resize — some mobile
   // browsers fire 'resize' with stale/intermediate width/height mid-
