@@ -581,6 +581,11 @@
   #board-wrap.view-3d{
     perspective:1500px;
     perspective-origin:50% 22%;
+    /* Standing pieces rise ABOVE their own squares, so the back rank sticks
+       out past the top edge of the board. With the board sitting flush against
+       the top of the screen those pieces were cut in half by the viewport.
+       One square's worth of room here gives them somewhere to be. */
+    padding-top:calc(var(--sq) * 1.1);
     padding-bottom:calc(clamp(6px, calc(var(--sq) * .35), 36px) + 30px);
     /* Free strip on the right for the tilt arrows. The wrapper centres its
        children in the content box, so widening the padding here pushes the
@@ -2042,11 +2047,15 @@
      the piece upright. Mirroring it instead left the auto-flip view with no
      visible pieces at all. Only face-far — "turn to face the other player" —
      is a mirroring. */
-  #board.board3d .piece.piece-vec.face-far,
-  #board.board3d .piece.piece3d.face-far{
+  #board.board3d .piece.face-far{
+    /* Upside down, as the option promises — but pivoting about the piece's own
+       centre. With the default origin the 180° turn swung the piece a full
+       height downwards, below the board surface, where it was hidden by the
+       board itself: only its shadow stayed visible. */
+    transform-origin: 50% 50% !important;
     transform: rotateX(var(--piece-stand)) translateY(var(--piece-seat, 0%))
                scale(var(--piece-tilt-scale, 1)) scale(var(--piece-extra-scale, 1))
-               scaleX(-1) !important;
+               rotate(180deg) !important;
   }
 </style>
 </head>
