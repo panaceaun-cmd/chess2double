@@ -3686,12 +3686,40 @@
     // "viewport minus the sidebar" — reserving space for the sidebar here
     // was capping the board even in cases the layout already handles fine.
     const available = Math.max(160, vw - bodyPadding);
+
     let best = 10;
     for(let sq = 10; sq <= 160; sq++){
       if(widthForBoardSq(sq) <= available) best = sq; else break;
     }
     return best;
   }
+  // Shrink until the board actually fits, measuring what is on screen rather
+  // than computing it. The tilted 3D board is drawn through a perspective, so
+  // its near edge renders WIDER than its layout width — by how much depends on
+  // the board size, the tilt and the browser. Predicting that from the CSS was
+  // wrong twice; measuring is not.
+  function fitBoardToViewport(){
+    const be = document.getElementById('board');
+    if(!be) return;
+    // Growing back up is only for an automatic size — a size the player chose
+    // is theirs. Shrinking, on the other hand, happens either way: a board
+    // hanging off both edges of the screen is nobody's intention.
+    let sq = preferredBoardSizePx;
+    if(boardSizeIsAuto){ sq = maxFittingBoardSize(); applyBoardSize(sq, false); }
+    for(let i = 0; i < 10; i++){
+      const r = be.getBoundingClientRect();
+      if(!r.width) return;
+      const vw = window.innerWidth;
+      const over = Math.max(0, -r.left) + Math.max(0, r.right - vw);
+      if(over <= 4) break;
+      const factor = Math.max(0.7, (r.width - over - 10) / r.width);
+      const next = Math.max(10, Math.floor(sq * factor));
+      if(next >= sq) break;
+      sq = next;
+      applyBoardSize(sq, false);
+    }
+  }
+
   function applyBoardSize(px, save){
     preferredBoardSizePx = px;
     const maxFit = maxFittingBoardSize();
@@ -15198,7 +15226,7 @@
   let boardSizeResizeTimer = null;
   window.addEventListener('resize', () => {
     clearTimeout(boardSizeResizeTimer);
-    boardSizeResizeTimer = setTimeout(() => applyBoardSize(boardSizeIsAuto ? maxFittingBoardSize() : preferredBoardSizePx, false), 150);
+    boardSizeResizeTimer = setTimeout(() => fitBoardToViewport(), 150);
   });
   // Rotation does not always fire a resize on mobile, and when it does the new
   // dimensions are not ready yet — hence the delays.
@@ -15207,7 +15235,7 @@
       // Nothing to resize before the game has built a board; touching it
       // earlier drags render() in over an array that does not exist yet.
       if(typeof gameStarted !== 'undefined' && !gameStarted) return;
-      if(boardSizeIsAuto) applyBoardSize(maxFittingBoardSize(), false);
+      fitBoardToViewport();
     }, ms));
   });
   // Rotating a phone is its own event, not just a resize — some mobile
@@ -15221,8 +15249,8 @@
   // (whatever's currently clamped) — otherwise a momentary narrow reading
   // during the rotation would permanently shrink the preference itself.
   window.addEventListener('orientationchange', () => {
-    setTimeout(() => applyBoardSize(boardSizeIsAuto ? maxFittingBoardSize() : preferredBoardSizePx, false), 300);
-    setTimeout(() => applyBoardSize(boardSizeIsAuto ? maxFittingBoardSize() : preferredBoardSizePx, false), 700);
+    setTimeout(() => fitBoardToViewport(), 300);
+    setTimeout(() => fitBoardToViewport(), 700);
   });
 
   // When the tab/browser actually closes, make sure no trace of an active
@@ -15829,6 +15857,11 @@
     refreshAdSlots();
     layoutMobilePanels();
     initDraggablePanels();
+    // Fit the board once everything above has had its say about the layout.
+    // Three attempts because fonts, panels and the 3D transform each settle at
+    // their own pace, and the board's real on-screen width only becomes known
+    // after the last of them.
+    [60, 350, 900].forEach(ms => setTimeout(() => { try{ fitBoardToViewport(); }catch(e){} }, ms));
     alignRightPanelsToBoard();
     setTimeout(alignRightPanelsToBoard, 300); // re-check once ad slots/fonts settle
     // First launch: the consent dialog comes first, in the language just
