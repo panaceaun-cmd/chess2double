@@ -2037,10 +2037,13 @@
      vanished behind the surface, leaving only its shadow: exactly what the
      "top view" and "facing" options looked like.
      scaleX(-1) mirrors and keeps the piece upright. */
+  /* face-counter is NOT here on purpose: that class compensates for the board
+     itself being turned 180°, and it genuinely needs rotate(180deg) to keep
+     the piece upright. Mirroring it instead left the auto-flip view with no
+     visible pieces at all. Only face-far — "turn to face the other player" —
+     is a mirroring. */
   #board.board3d .piece.piece-vec.face-far,
-  #board.board3d .piece.piece3d.face-far,
-  #board.board3d .piece.piece-vec.face-counter,
-  #board.board3d .piece.piece3d.face-counter{
+  #board.board3d .piece.piece3d.face-far{
     transform: rotateX(var(--piece-stand)) translateY(var(--piece-seat, 0%))
                scale(var(--piece-tilt-scale, 1)) scale(var(--piece-extra-scale, 1))
                scaleX(-1) !important;
