@@ -3660,6 +3660,7 @@
     const wrapBorder = Math.max(1, Math.min(sq * .05, 6));
     return 2 * (coord + pad + wrapBorder) + sq * 16;
   }
+  let boardSizeIsAuto = false;
   function maxFittingBoardSize(){
     const vw = window.innerWidth || 380;
     let bodyPadding;
@@ -3776,6 +3777,12 @@
     // new visitor's board defaulted small with empty space around it on a
     // wide desktop screen, even though nothing was actually stopping it
     // from being bigger.
+    // Remember whether this size was chosen by the player or picked
+    // automatically. An automatic one has to be recomputed once the layout has
+    // settled: the first measurement happens before fonts, panels and mobile
+    // chrome are final, and on a phone it came out far smaller than what
+    // actually fits.
+    boardSizeIsAuto = !saved;
     const px = saved ? parseInt(saved) : maxFittingBoardSize();
     applyBoardSize(px, !saved);
   })();
@@ -15165,7 +15172,7 @@
   let boardSizeResizeTimer = null;
   window.addEventListener('resize', () => {
     clearTimeout(boardSizeResizeTimer);
-    boardSizeResizeTimer = setTimeout(() => applyBoardSize(preferredBoardSizePx, false), 150);
+    boardSizeResizeTimer = setTimeout(() => applyBoardSize(boardSizeIsAuto ? maxFittingBoardSize() : preferredBoardSizePx, false), 150);
   });
   // Rotating a phone is its own event, not just a resize — some mobile
   // browsers fire 'resize' with stale/intermediate width/height mid-
@@ -15178,8 +15185,8 @@
   // (whatever's currently clamped) — otherwise a momentary narrow reading
   // during the rotation would permanently shrink the preference itself.
   window.addEventListener('orientationchange', () => {
-    setTimeout(() => applyBoardSize(preferredBoardSizePx, false), 300);
-    setTimeout(() => applyBoardSize(preferredBoardSizePx, false), 700);
+    setTimeout(() => applyBoardSize(boardSizeIsAuto ? maxFittingBoardSize() : preferredBoardSizePx, false), 300);
+    setTimeout(() => applyBoardSize(boardSizeIsAuto ? maxFittingBoardSize() : preferredBoardSizePx, false), 700);
   });
 
   // When the tab/browser actually closes, make sure no trace of an active
@@ -15660,14 +15667,14 @@
   const UBC_PANEL_STATE_KEY = 'chess2-ubc-panel-state';
   let ubcPanelState = {};
   try{ ubcPanelState = JSON.parse(localStorage.getItem(UBC_PANEL_STATE_KEY) || '{}'); }catch(e){ ubcPanelState = {}; }
-  // local-players-panel and online-panel default to visible (not just
-  // "open") — together they're the two ways to actually start a game
-  // (local setup, or the online lobby with quick-match/friends), so hiding
-  // either by default would bury a new player's entry point behind an
-  // unlabeled button. Chat and history are included here too now, per the
-  // requested default arrangement — all four panels visible right away.
+  // All panels start CLOSED. They used to open on first load, and on a phone
+  // the four of them filled the screen and pushed the board into whatever was
+  // left — the board looked tiny not because it was sized wrong but because
+  // it had nowhere to be. The buttons that open them are always on screen, so
+  // nothing is buried; the board simply gets the whole viewport until the
+  // player asks for something else.
   ['local-players-panel', 'online-panel', 'chat-panel', 'history-panel'].forEach(id => {
-    if(!(id in ubcPanelState)) ubcPanelState[id] = true;
+    if(!(id in ubcPanelState)) ubcPanelState[id] = false;
   });
 
   function applyUbcPanelVisibility(panelId){
