@@ -2052,7 +2052,11 @@
        centre. With the default origin the 180° turn swung the piece a full
        height downwards, below the board surface, where it was hidden by the
        board itself: only its shadow stayed visible. */
-    transform-origin: 50% 50% !important;
+    /* Pivot about the piece's own FIGURE, not the middle of its box. A sprite
+       sits at the bottom of a box roughly twice a square tall (the extra room
+       is what lets a standing piece rise above its square), so turning about
+       the box centre lifted the figure a whole square clear of the board. */
+    transform-origin: 50% calc(100% - var(--sq) * 0.55) !important;
     transform: rotateX(var(--piece-stand)) translateY(var(--piece-seat, 0%))
                scale(var(--piece-tilt-scale, 1)) scale(var(--piece-extra-scale, 1))
                rotate(180deg) !important;
