@@ -2029,6 +2029,22 @@
     font-size:13px; font-family:'Inter',sans-serif;
   }
   .lang-gate-btn:active{background:rgba(201,162,75,.3);}
+  /* ---- pieces facing the far player, on the tilted board ----
+     "Face the other player" must MIRROR a piece, never turn it upside down.
+     The generic glyph rule uses rotate(180deg), and on the 3D board it was
+     winning over the sprite rule — so a mirrored piece ended up rotated in the
+     board plane, standing INTO the board instead of up from it. On screen it
+     vanished behind the surface, leaving only its shadow: exactly what the
+     "top view" and "facing" options looked like.
+     scaleX(-1) mirrors and keeps the piece upright. */
+  #board.board3d .piece.piece-vec.face-far,
+  #board.board3d .piece.piece3d.face-far,
+  #board.board3d .piece.piece-vec.face-counter,
+  #board.board3d .piece.piece3d.face-counter{
+    transform: rotateX(var(--piece-stand)) translateY(var(--piece-seat, 0%))
+               scale(var(--piece-tilt-scale, 1)) scale(var(--piece-extra-scale, 1))
+               scaleX(-1) !important;
+  }
 </style>
 </head>
 <body>
