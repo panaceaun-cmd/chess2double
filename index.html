@@ -3747,9 +3747,25 @@
       const r = be.getBoundingClientRect();
       if(!r.width) return;
       const vw = window.innerWidth;
-      const over = Math.max(0, -r.left) + Math.max(0, r.right - vw);
+      const overX = Math.max(0, -r.left) + Math.max(0, r.right - vw);
+
+      // Standing pieces on the back rank rise ABOVE the board's own top edge,
+      // so the board fitting the screen is not enough — that overhang has to
+      // fit as well, or the far row is sliced off by the top of the window.
+      // Measure the real extent of everything drawn, pieces included.
+      let top = r.top, bottom = r.bottom;
+      be.querySelectorAll('.piece').forEach(el => {
+        const pr = el.getBoundingClientRect();
+        if(pr.height){ if(pr.top < top) top = pr.top; if(pr.bottom > bottom) bottom = pr.bottom; }
+      });
+      const needH = bottom - top;
+      const haveH = window.innerHeight * 0.92;
+      const overY = Math.max(0, needH - haveH);
+
+      const over = Math.max(overX, overY);
       if(over <= 4) break;
-      const factor = Math.max(0.7, (r.width - over - 10) / r.width);
+      const base = overY > overX ? needH : r.width;
+      const factor = Math.max(0.7, (base - over - 10) / base);
       const next = Math.max(10, Math.floor(sq * factor));
       if(next >= sq) break;
       sq = next;
