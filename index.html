@@ -3735,7 +3735,16 @@
   // its near edge renders WIDER than its layout width — by how much depends on
   // the board size, the tilt and the browser. Predicting that from the CSS was
   // wrong twice; measuring is not.
+  // A phone held upright shows the "rotate your device" overlay — the game is
+  // not played in that position at all. Measuring there produced a board sized
+  // for a 390px-wide screen (19px squares), and because every rotation back to
+  // portrait re-measured, a size set in landscape was thrown away seconds
+  // later. Portrait is now simply ignored: the landscape size stands.
+  function isPortraitPhone(){
+    return window.innerWidth < 900 && window.innerHeight > window.innerWidth;
+  }
   function fitBoardToViewport(){
+    if(isPortraitPhone()) return;
     const be = document.getElementById('board');
     if(!be) return;
     // Growing back up is only for an automatic size — a size the player chose
@@ -3881,7 +3890,11 @@
     // why the board stayed small in landscape and had to be enlarged by hand
     // every time. Only the slider saves.
     boardSizeIsAuto = !saved;
-    const px = saved ? parseInt(saved) : maxFittingBoardSize();
+    // Same reason: do not take a first measurement while the phone is upright.
+    // fitBoardToViewport() runs again on rotation and on startup, so the board
+    // gets its size as soon as the device is held the way the game is played.
+    const px = saved ? parseInt(saved)
+                     : (isPortraitPhone() ? 48 : maxFittingBoardSize());
     applyBoardSize(px, false);
   })();
 
