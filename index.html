@@ -2425,13 +2425,12 @@
 
   /* move toast */
   #move-toast{
-    /* Was position:absolute with top:10px, which laid the move caption over
-       the two player cards — names and clocks disappeared underneath it on a
-       phone. In the normal flow it takes its own line and pushes them down
-       instead of covering them. */
-    position:relative; top:auto; left:auto; right:auto;
-    margin:0 auto 8px; width:max-content; max-width:96%;
-    transform:translateY(-6px);
+    /* Back at the top of the board area where it belongs. It used to sit ON
+       the two player cards and hide their names and clocks; the container now
+       reserves a strip for it (see .board-stage padding below), so the caption
+       is above them rather than over them. */
+    position:absolute; top:6px; left:50%; right:auto;
+    transform:translateX(-50%) translateY(-6px);
     background:linear-gradient(160deg,rgba(44,31,23,.97),rgba(24,15,10,.97));
     border:1px solid var(--brass); border-radius:12px;
     padding:8px 20px; color:var(--ink);
@@ -2535,7 +2534,11 @@
     background:rgba(15,9,6,.7); padding:10px 22px; border-radius:10px;
     border:1px solid var(--brass-dim);
   }
-  #move-toast.show{opacity:1; transform:translateY(0);}
+  #move-toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+  /* Room for the caption above the player cards: the top row of cards is
+     pushed down by the height of the caption, so the two never overlap. */
+  #corner-bars-top{ margin-top:52px; }
+  @media (max-width:1023px){ #corner-bars-top{ margin-top:46px; } }
   #move-toast .toast-move{
     font-size:12px; color:var(--ink-dim); font-family:'Inter',sans-serif;
   }
@@ -4518,6 +4521,18 @@
       const manual = localStorage.getItem('chess2-boardsize-manual') === '1';
       saved = manual ? localStorage.getItem('chess2-boardsize') : null;
       if(!manual) localStorage.removeItem('chess2-boardsize');   // drop the stale one
+      // A value less than half of what the screen can show was almost
+      // certainly measured on a phone held upright by an older build (19px
+      // across a 390px screen). Treat it as rubbish and forget it, or it comes
+      // back on every single launch.
+      if(saved){
+        const fits = maxFittingBoardSize();
+        if(parseInt(saved) < fits * 0.5){
+          saved = null;
+          localStorage.removeItem('chess2-boardsize');
+          localStorage.removeItem('chess2-boardsize-manual');
+        }
+      }
     }catch(e){}
     // maxFittingBoardSize() measures the real available space and was
     // built for exactly this — the old Math.min(43, ...) cap here predates
