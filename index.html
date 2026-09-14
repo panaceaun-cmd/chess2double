@@ -2643,6 +2643,10 @@
     transform: rotateX(var(--piece-stand)) translateY(var(--piece-seat, 0%))
                scale(var(--piece-tilt-scale, 1)) scale(var(--piece-extra-scale, 1))
                scaleX(1) !important;
+    /* A flipped piece reads as taller because its widest part is now at the
+       top. Seating it slightly lower keeps the back rank inside the board
+       instead of poking out past its edge. */
+    margin-top: calc(var(--sq) * 0.18) !important;
   }
 </style>
 </head>
@@ -14263,6 +14267,11 @@
             (faceFar ? ' face-far' : '') + (counterFlip ? ' face-counter' : '');
           span.textContent = GLYPH[piece.color][piece.type];
           span.dataset.glyph = GLYPH[piece.color][piece.type];
+          // Nearer ranks must always be drawn over farther ones. Upright
+          // pieces lean towards the viewer and win that overlap by themselves;
+          // a flipped one does not, so the far rank ended up painted over the
+          // rank in front of it. Ordering by row settles it for every case.
+          span.style.zIndex = String(10 + (ROWS - r));
           if(usePiecePack()){
             const sprite = spriteForFacing(piecePackSprite(piece.type, piece.color), faceFar);
             if(sprite){
