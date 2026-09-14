@@ -2060,11 +2060,17 @@
          transform-origin: 50% calc(100% - var(--sq) * K) !important;
      K nudges the piece: larger K moves it DOWN, smaller moves it UP. Around
      0.5-1.0 is the useful range. */
-  #board.board3d .piece.piece-vec.face-far,
-  #board.board3d .piece.piece3d.face-far{
+  #board.board3d .piece.face-far{
+    /* Pivot about the centre of the DRAWN piece, measured rather than guessed:
+       the sprite is 253x454 with visible pixels in rows 209..447, drawn with
+       background-size:contain and bottom-aligned. In the element's box that
+       puts the figure's centre 0.39 of a square above the box bottom. Turning
+       about the box centre or its base swung the figure off its square — this
+       keeps it exactly where it stood, only upside down. */
+    transform-origin: 50% calc(100% - var(--sq) * 0.515) !important;
     transform: rotateX(var(--piece-stand)) translateY(var(--piece-seat, 0%))
                scale(var(--piece-tilt-scale, 1)) scale(var(--piece-extra-scale, 1))
-               scaleX(-1) !important;
+               rotate(180deg) !important;
   }
 </style>
 </head>
