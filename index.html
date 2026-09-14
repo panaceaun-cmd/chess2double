@@ -4013,12 +4013,29 @@
     11: { contrast: 1.0, outline: 4.0 },   // 3D Classic
   };
   const STYLE_LOOK_FALLBACK = { contrast: 3.0, outline: 1.6 };
+  // Contrast and outline are stored PER STYLE. They used to share one value
+  // for the whole game, so switching the board between 2D and 3D — which
+  // changes the style — dragged the previous style's numbers along and
+  // 3D Classic lost its 100% / 4.0px every time.
+  function styleLookKey(n){ return 'chess2-look-' + n; }
+  function saveStyleLook(n){
+    try{
+      localStorage.setItem(styleLookKey(n), JSON.stringify({
+        contrast: pieceDetailContrast, outline: outline3dWidth
+      }));
+    }catch(e){}
+  }
   function applyStyleLookDefaults(n){
-    const key = 'chess2-look-touched-' + n;
-    let touched = false;
-    try{ touched = localStorage.getItem(key) === '1'; }catch(e){}
-    if(touched) return;                       // the player set it, leave it alone
-    const d = STYLE_LOOK_DEFAULTS[n] || STYLE_LOOK_FALLBACK;
+    // The player's own settings for this style win; otherwise its defaults.
+    let d = null;
+    try{
+      const raw = localStorage.getItem(styleLookKey(n));
+      if(raw){
+        const o = JSON.parse(raw);
+        if(o && isFinite(o.contrast) && isFinite(o.outline)) d = o;
+      }
+    }catch(e){}
+    if(!d) d = STYLE_LOOK_DEFAULTS[n] || STYLE_LOOK_FALLBACK;
     try{
       // Same keys and same helpers the sliders themselves use, so the value,
       // the control and the saved setting never drift apart.
@@ -6704,12 +6721,9 @@
     });
     if(widthEl) widthEl.addEventListener('input', e=>{
       outline3dWidth = Math.max(0, Math.min(8, parseFloat(e.target.value) || 0));
-      try{
-        localStorage.setItem('chess2-outline3d-width', String(outline3dWidth));
-        // Remember that this style's look is the player's now, so switching
-        // away and back does not overwrite their choice with the default.
-        localStorage.setItem('chess2-look-touched-' + pieceStyle, '1');
-      }catch(err){}
+      try{ localStorage.setItem('chess2-outline3d-width', String(outline3dWidth)); }catch(err){}
+      // Remember it against the style it was chosen for.
+      saveStyleLook(pieceStyle);
       sync(); applyToGlyphs(true); invalidatePiece3D();
     });
     sync();
@@ -6726,6 +6740,7 @@
       const raw = parseFloat(e.target.value);
       pieceDetailContrast = Math.max(0, Math.min(10, (isFinite(raw) ? raw : 100) / 100));
       try{ localStorage.setItem('chess2-pack-detail', String(pieceDetailContrast)); }catch(err){}
+      saveStyleLook(pieceStyle);
       sync(); invalidatePiece3D();
     });
     sync();
