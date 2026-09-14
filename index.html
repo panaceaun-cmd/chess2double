@@ -4415,15 +4415,20 @@
 
   function applyBoardSize(px, save){
     preferredBoardSizePx = px;
+    // Never clamp against a portrait measurement. On a phone the first load
+    // happens upright, behind the "rotate your device" overlay, where only
+    // about 19px fits across a 390px screen — and a saved 39px was being cut
+    // down to that every single launch. Upright is not a size the game is ever
+    // played at, so the limit simply does not apply there.
     const maxFit = maxFittingBoardSize();
-    px = Math.min(px, maxFit);
+    if(!isPortraitPhone()) px = Math.min(px, maxFit);
     boardSizePx = px;
     document.documentElement.style.setProperty('--sq', px + 'px');
     const label = document.getElementById('board-size-value');
     if(label) label.textContent = px + 'px';
     const range = document.getElementById('board-size-range');
     if(range){
-      range.max = String(maxFit);
+      if(!isPortraitPhone()) range.max = String(maxFit);
       if(parseInt(range.value) !== px) range.value = px;
     }
     if(save){
@@ -4525,7 +4530,7 @@
       // certainly measured on a phone held upright by an older build (19px
       // across a 390px screen). Treat it as rubbish and forget it, or it comes
       // back on every single launch.
-      if(saved){
+      if(saved && !isPortraitPhone()){
         const fits = maxFittingBoardSize();
         if(parseInt(saved) < fits * 0.5){
           saved = null;
