@@ -2750,6 +2750,23 @@
   }
   #board .piece{ z-index:6; }
   #board-bright-block input[type="range"]{ width:100%; display:block; margin-top:8px; height:22px; }
+  /* Square lightness — one layer for the whole board.
+     Per-square tinting kept coming out uneven: squares under pieces ended up a
+     different shade from empty ones, whichever property was used. A single
+     sheet stretched over the entire board cannot vary from square to square —
+     there is only one of it. It sits above the squares and below the pieces,
+     so the board changes and the pieces do not. */
+  #board{ position:relative; }
+  #board::after{
+    content:''; position:absolute; inset:0;
+    background:var(--board-tint, transparent);
+    pointer-events:none; z-index:5;
+    border-radius:inherit;
+  }
+  #board .piece{ z-index:6; }
+  #board.board3d .piece.piece3d,
+  #board.board3d .piece.piece-vec{ z-index:6; }
+  #board-bright-block input[type="range"]{ width:100%; display:block; margin-top:8px; height:22px; }
 </style>
 </head>
 <body>
