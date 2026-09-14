@@ -2643,10 +2643,20 @@
     transform: rotateX(var(--piece-stand)) translateY(var(--piece-seat, 0%))
                scale(var(--piece-tilt-scale, 1)) scale(var(--piece-extra-scale, 1))
                scaleX(1) !important;
-    /* A flipped piece reads as taller because its widest part is now at the
-       top. Seating it slightly lower keeps the back rank inside the board
-       instead of poking out past its edge. */
-    margin-top: calc(var(--sq) * 0.18) !important;
+    /* NOTE for later: an upside-down piece ought to hang towards the viewer
+       instead of rising away from them. Moving it along the board with
+       translateY was tried and pushes it INTO the board surface, where the
+       squares hide everything but its cap — the same trap every transform
+       here falls into. Doing it properly means drawing the piece from a
+       different viewpoint, not moving the existing one. */
+    /* An upright piece rests its base on the square and rises AWAY from the
+       viewer, past the top edge of the board. Turn it over and the base is at
+       the top, so the body must hang the other way — down, towards the viewer,
+       over the squares in front. Mirroring the artwork in place left it rising
+       upwards as before, which is why the far rank kept spilling over the top
+       border instead of over the board. Dropping it by its own height puts the
+       base back on its square. */
+
   }
 </style>
 </head>
