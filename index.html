@@ -4004,9 +4004,49 @@
   const TILT_ONLY_STYLES = [15];
   // Applies a style everywhere it is reflected: the variable, the dropdown,
   // its description, the saved setting and the sprite caches.
+  // Per-style defaults for contrast and outline width. 3D Classic is modelled
+  // with its own shading already baked in, so the usual 300% contrast and a
+  // hairline outline make it look harsh — it wants plain 100% and a thick
+  // 4px contour. Every other style keeps what it had. Applied only when the
+  // player has not set these themselves for that style.
+  const STYLE_LOOK_DEFAULTS = {
+    11: { contrast: 1.0, outline: 4.0 },   // 3D Classic
+  };
+  const STYLE_LOOK_FALLBACK = { contrast: 3.0, outline: 1.6 };
+  function applyStyleLookDefaults(n){
+    const key = 'chess2-look-touched-' + n;
+    let touched = false;
+    try{ touched = localStorage.getItem(key) === '1'; }catch(e){}
+    if(touched) return;                       // the player set it, leave it alone
+    const d = STYLE_LOOK_DEFAULTS[n] || STYLE_LOOK_FALLBACK;
+    try{
+      // Same keys and same helpers the sliders themselves use, so the value,
+      // the control and the saved setting never drift apart.
+      pieceDetailContrast = d.contrast;
+      localStorage.setItem('chess2-pack-detail', String(d.contrast));
+      document.documentElement.style.setProperty('--piece-global-contrast', String(d.contrast));
+      const cr = document.getElementById('pack-detail-contrast');
+      if(cr) cr.value = String(Math.round(d.contrast * 100));
+      const cv = document.getElementById('pack-detail-value');
+      if(cv) cv.textContent = Math.round(d.contrast * 100) + '%';
+
+      outline3dWidth = d.outline;
+      localStorage.setItem('chess2-outline3d-width', String(d.outline));
+      const wr = document.getElementById('outline3d-width');
+      if(wr) wr.value = String(d.outline);
+      const wv = document.getElementById('outline3d-value');
+      if(wv) wv.textContent = d.outline.toFixed(1) + 'px';
+      // The outline is drawn through the per-colour strokes, so it has to go
+      // through the same path the shared slider uses.
+      if(typeof applyToGlyphs === 'function') applyToGlyphs(true);
+      if(typeof invalidatePiece3D === 'function') invalidatePiece3D();
+    }catch(e){}
+  }
+
   function setPieceStyleTo(n){
     pieceStyle = n;
     try{ localStorage.setItem('chess2-pstyle', String(pieceStyle)); }catch(e){}
+    applyStyleLookDefaults(n);
     const sel = document.getElementById('piece-style-select');
     if(sel) sel.value = String(pieceStyle);
     const desc = document.getElementById('piece-style-desc');
@@ -4747,6 +4787,9 @@
     const desc = document.getElementById('piece-style-desc');
     if(desc) desc.textContent = t('pstyleDesc' + pieceStyle);
     try{ localStorage.setItem('chess2-pstyle', String(pieceStyle)); }catch(err){}
+    // The dropdown changes the style without going through setPieceStyleTo(),
+    // so the per-style look defaults have to be applied here as well.
+    applyStyleLookDefaults(pieceStyle);
     render();
   });
 
@@ -6657,7 +6700,12 @@
     });
     if(widthEl) widthEl.addEventListener('input', e=>{
       outline3dWidth = Math.max(0, Math.min(8, parseFloat(e.target.value) || 0));
-      try{ localStorage.setItem('chess2-outline3d-width', String(outline3dWidth)); }catch(err){}
+      try{
+        localStorage.setItem('chess2-outline3d-width', String(outline3dWidth));
+        // Remember that this style's look is the player's now, so switching
+        // away and back does not overwrite their choice with the default.
+        localStorage.setItem('chess2-look-touched-' + pieceStyle, '1');
+      }catch(err){}
       sync(); applyToGlyphs(true); invalidatePiece3D();
     });
     sync();
