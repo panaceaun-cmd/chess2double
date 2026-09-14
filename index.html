@@ -2068,9 +2068,16 @@
        about the box centre or its base swung the figure off its square — this
        keeps it exactly where it stood, only upside down. */
     transform-origin: 50% calc(100% - var(--sq) * 0.555) !important;
+    /* Order checked by measurement: with rotate(180deg) placed FIRST the piece
+       ends up lying flat (its box collapses to 7px tall). Last is correct —
+       the piece stays upright, 137px, same as an unflipped one. */
     transform: rotateX(var(--piece-stand)) translateY(var(--piece-seat, 0%))
                scale(var(--piece-tilt-scale, 1)) scale(var(--piece-extra-scale, 1))
                rotate(180deg) !important;
+    /* Flipped pieces lean the other way and lose the front-to-back overlap
+       with the rank ahead of them, which made the far rows look half-buried
+       in the board. Lifting them slightly towards the viewer restores it. */
+    z-index: 4;
   }
 </style>
 </head>
