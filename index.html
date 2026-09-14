@@ -2656,6 +2656,10 @@
      different rendering job, not a transform. */
   #board.board3d .piece.piece-vec.face-far,
   #board.board3d .piece.piece3d.face-far{
+    /* Pivoting on the TOP edge was tried too: the piece then rotates DOWN,
+       which in a board tilted away from the camera means down THROUGH the
+       surface — the board hides it and only the shadow is left. Added to the
+       list below. */
     transform: rotateX(var(--piece-stand)) translateY(var(--piece-seat, 0%))
                scale(var(--piece-tilt-scale, 1)) scale(var(--piece-extra-scale, 1))
                scaleX(1) !important;
@@ -4389,7 +4393,22 @@
       range.max = String(maxFit);
       if(parseInt(range.value) !== px) range.value = px;
     }
-    if(save){ try{ localStorage.setItem('chess2-boardsize', String(preferredBoardSizePx)); }catch(e){} }
+    if(save){
+      // From this moment the size is the player's, not the game's: automatic
+      // refitting must never overwrite it again, only shrink it if it does not
+      // fit the screen at all.
+      boardSizeIsAuto = false;
+      try{
+        localStorage.setItem('chess2-boardsize', String(preferredBoardSizePx));
+        // Marks this size as the PLAYER's own choice. Older versions also
+        // saved sizes the game had picked by itself — including one measured
+        // on a phone held upright, where the board is 390px wide and a square
+        // comes out at 19px. That value then looked like a deliberate choice
+        // and survived every rotation. Only the slider writes this flag now,
+        // so a size without it is treated as stale and recomputed.
+        localStorage.setItem('chess2-boardsize-manual', '1');
+      }catch(e){}
+    }
     // Sync the corner-bar rows to the board's own actual width — without
     // this, their own content (a long nickname, a full row of captured-
     // piece icons) can need more room than a small board does, and since
@@ -4465,7 +4484,11 @@
   });
   (function initBoardSize(){
     let saved = null;
-    try{ saved = localStorage.getItem('chess2-boardsize'); }catch(e){}
+    try{
+      const manual = localStorage.getItem('chess2-boardsize-manual') === '1';
+      saved = manual ? localStorage.getItem('chess2-boardsize') : null;
+      if(!manual) localStorage.removeItem('chess2-boardsize');   // drop the stale one
+    }catch(e){}
     // maxFittingBoardSize() measures the real available space and was
     // built for exactly this — the old Math.min(43, ...) cap here predates
     // the page container being widened and was the last leftover reason a
