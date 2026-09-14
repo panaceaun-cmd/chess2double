@@ -6565,25 +6565,29 @@
     // exactly like the board theme above. Without the flag, switching views
     // would keep overwriting a style the player had deliberately chosen.
     if(save){
-      const flagKey = view3D ? 'chess2-pstyle-3d-set' : 'chess2-pstyle-2d-set';
-      let already = false;
-      try{ already = localStorage.getItem(flagKey) === '1'; }catch(e){}
-      // Flat silhouettes are drawn as a single solid shape with no shading,
-      // so on a tilted board they read as cardboard cut-outs rather than
-      // pieces. Switching to 3D therefore always moves off them, even if
-      // this mode was already settled — the one-time default below only
-      // covers the case where nothing has been chosen yet.
-      if(view3D && FLAT_ONLY_STYLES.indexOf(pieceStyle) !== -1){
-        try{ localStorage.setItem(flagKey, '1'); }catch(e){}
-        setPieceStyleTo(DEFAULT_STYLE_3D);
-      } else if(!view3D && TILT_ONLY_STYLES.indexOf(pieceStyle) !== -1){
-        // and back the other way: a set drawn for the tilted board loses its
-        // depth cues on a flat one, so going flat returns to the silhouettes
-        try{ localStorage.setItem(flagKey, '1'); }catch(e){}
-        setPieceStyleTo(DEFAULT_STYLE_2D);
-      } else if(!already){
-        try{ localStorage.setItem(flagKey, '1'); }catch(e){}
-        setPieceStyleTo(view3D ? DEFAULT_STYLE_3D : DEFAULT_STYLE_2D);
+      // The two views keep separate piece styles.
+      //   3D -> 2D : always the flat silhouettes. A set drawn for a tilted
+      //              board loses every depth cue when the board goes flat, so
+      //              there is nothing to preserve.
+      //   2D -> 3D : whatever was last used in 3D comes back. It is remembered
+      //              on the way out, which is why the switch has to happen
+      //              before the style is changed.
+      const STYLE_3D_KEY = 'chess2-pstyle-3d';
+      if(!view3D){
+        // Leaving 3D: remember the style that was in use there, unless we are
+        // already on a flat-only one (that would store a 2D style as the 3D
+        // one and lose the real choice).
+        if(FLAT_ONLY_STYLES.indexOf(pieceStyle) === -1){
+          try{ localStorage.setItem(STYLE_3D_KEY, String(pieceStyle)); }catch(e){}
+        }
+        if(pieceStyle !== DEFAULT_STYLE_2D) setPieceStyleTo(DEFAULT_STYLE_2D);
+      } else {
+        let want = 0;
+        try{ want = parseInt(localStorage.getItem(STYLE_3D_KEY)) || 0; }catch(e){}
+        // Nothing remembered, or something flat got in there — fall back to
+        // the standard 3D set.
+        if(!want || FLAT_ONLY_STYLES.indexOf(want) !== -1) want = DEFAULT_STYLE_3D;
+        if(pieceStyle !== want) setPieceStyleTo(want);
       }
     }
     if(save){
