@@ -4341,6 +4341,27 @@
   function isPortraitPhone(){
     return window.innerWidth < 900 && window.innerHeight > window.innerWidth;
   }
+  // Watchdog. Every recalculation so far hung on an EVENT: resize or
+  // orientationchange. On a real phone those either do not arrive or arrive
+  // while the browser still reports the OLD dimensions, and the board keeps
+  // whatever size it was given in portrait — 19px squares measured across a
+  // 390px screen. This depends on nothing but a clock: twice a second it
+  // compares the board against what actually fits and corrects it. A size the
+  // player chose is never touched.
+  let boardFitWatchdog = null;
+  function startBoardFitWatchdog(){
+    if(boardFitWatchdog) return;
+    boardFitWatchdog = setInterval(() => {
+      try{
+        if(!boardSizeIsAuto) return;
+        if(isPortraitPhone()) return;          // upright: the game is not played here
+        const want = maxFittingBoardSize();
+        const have = preferredBoardSizePx || 0;
+        if(Math.abs(want - have) > Math.max(3, want * 0.08)) fitBoardToViewport();
+      }catch(e){}
+    }, 500);
+  }
+
   function fitBoardToViewport(){
     if(isPortraitPhone()) return;
     const be = document.getElementById('board');
@@ -16614,7 +16635,8 @@
     // Three attempts because fonts, panels and the 3D transform each settle at
     // their own pace, and the board's real on-screen width only becomes known
     // after the last of them.
-    [60, 350, 900].forEach(ms => setTimeout(() => { try{ fitBoardToViewport(); }catch(e){} }, ms));
+    [60, 350, 900, 1800].forEach(ms => setTimeout(() => { try{ fitBoardToViewport(); }catch(e){} }, ms));
+    startBoardFitWatchdog();
     alignRightPanelsToBoard();
     setTimeout(alignRightPanelsToBoard, 300); // re-check once ad slots/fonts settle
     // First launch: the consent dialog comes first, in the language just
