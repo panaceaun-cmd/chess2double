@@ -2642,7 +2642,7 @@
   #board.board3d .piece.piece3d.face-far{
     transform: rotateX(var(--piece-stand)) translateY(var(--piece-seat, 0%))
                scale(var(--piece-tilt-scale, 1)) scale(var(--piece-extra-scale, 1))
-               scaleX(-1) !important;
+               scaleX(1) !important;
   }
 </style>
 </head>
@@ -14061,6 +14061,71 @@
   }
   // ================= END BOT (ROBOT OPPONENT) =================
 
+  // ---- upside-down sprites ----
+  // Turning the ELEMENT by 180° cannot work here: the board is tilted and the
+  // piece is stood back up by an opposite rotateX, and any Y-flip in that
+  // chain reverses the rotation — the piece ends up lying in the board plane.
+  // So the PICTURE is flipped instead, and the element is left completely
+  // alone. The flipped image is produced once per sprite on a canvas and
+  // cached, so nothing is added to the file and the piece keeps standing
+  // exactly as it did.
+  const flippedSpriteCache = new Map();
+  function flippedSprite(url, onReady){
+    if(!url) return null;
+    if(flippedSpriteCache.has(url)) return flippedSpriteCache.get(url);
+    flippedSpriteCache.set(url, null);           // in progress
+    const img = new Image();
+    img.onload = () => {
+      try{
+        const c = document.createElement('canvas');
+        c.width = img.naturalWidth; c.height = img.naturalHeight;
+        const g = c.getContext('2d');
+        // Flip the drawing WITHIN ITS OWN BOUNDS, not within the whole image.
+        // A sprite has a tall empty strip above the figure — the room a
+        // standing piece needs. Flipping the full image moves that strip to
+        // the bottom and the figure floats a square above its square. Finding
+        // the opaque band first and mirroring only that keeps the figure in
+        // exactly the same place, upside down.
+        const m = document.createElement('canvas');
+        m.width = c.width; m.height = c.height;
+        const mg = m.getContext('2d');
+        mg.drawImage(img, 0, 0);
+        const data = mg.getImageData(0, 0, m.width, m.height).data;
+        let t = -1, bm = -1;
+        for(let y = 0; y < m.height; y++){
+          let any = false;
+          for(let x = 0; x < m.width; x++){ if(data[(y * m.width + x) * 4 + 3] > 20){ any = true; break; } }
+          if(any){ if(t < 0) t = y; bm = y; }
+        }
+        if(t < 0){ t = 0; bm = m.height - 1; }
+        const bandH = bm - t + 1;
+        g.save();
+        g.translate(0, t + bandH);
+        g.scale(1, -1);
+        g.drawImage(img, 0, t, c.width, bandH, 0, 0, c.width, bandH);
+        g.restore();
+        flippedSpriteCache.set(url, c.toDataURL('image/png'));
+        if(onReady) onReady();
+      }catch(e){ flippedSpriteCache.set(url, url); }
+    };
+    img.onerror = () => flippedSpriteCache.set(url, url);
+    img.src = url;
+    return null;
+  }
+  let flipRepaintQueued = false;
+  function queueFlipRepaint(){
+    if(flipRepaintQueued) return;
+    flipRepaintQueued = true;
+    setTimeout(() => { flipRepaintQueued = false; try{ render(); }catch(e){} }, 60);
+  }
+  // Returns the sprite to actually draw: flipped for a piece that must face
+  // the far player, the original otherwise.
+  function spriteForFacing(url, faceFar){
+    if(!faceFar || !url) return url;
+    const f = flippedSprite(url, queueFlipRepaint);
+    return f || url;
+  }
+
   function render(){
     // A resize or an orientation change can reach here before the first game
     // has been built. Drawing squares from a board that does not exist yet
@@ -14199,21 +14264,21 @@
           span.textContent = GLYPH[piece.color][piece.type];
           span.dataset.glyph = GLYPH[piece.color][piece.type];
           if(usePiecePack()){
-            const sprite = piecePackSprite(piece.type, piece.color);
+            const sprite = spriteForFacing(piecePackSprite(piece.type, piece.color), faceFar);
             if(sprite){
               span.classList.add('piece-vec');
               span.style.backgroundImage = 'url("' + sprite + '")';
               span.textContent = '';
             }
           } else if(usePieceVector()){
-            const sprite = pieceVecSprite(piece.type, piece.color);
+            const sprite = spriteForFacing(pieceVecSprite(piece.type, piece.color), faceFar);
             if(sprite){
               span.classList.add('piece-vec');
               span.style.backgroundImage = 'url("' + sprite + '")';
               span.textContent = '';
             }
           } else if(usePiece3DModels()){
-            const sprite = piece3dSprite(piece.type, piece.color);
+            const sprite = spriteForFacing(piece3dSprite(piece.type, piece.color), faceFar);
             if(sprite){
               // Swap the glyph for the rendered model. The element, its
               // classes and its position in the square all stay the same,
