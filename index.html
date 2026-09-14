@@ -2724,6 +2724,32 @@
     pointer-events:none; z-index:1;
   }
   #board-bright-block input[type="range"]{ width:100%; display:block; margin-top:8px; height:22px; }
+  /* Square lightness layer — revised.
+     The 3D board paints each square's surface through .sq::before, and that
+     layer sat ABOVE the tint on some squares, so only part of the board
+     changed. The tint now sits above every square layer and the pieces are
+     lifted above the tint, so the whole board changes at once and nothing is
+     painted over a piece. */
+  #board .sq::after{
+    content:''; position:absolute; inset:0;
+    background:var(--board-tint, transparent);
+    pointer-events:none; z-index:5;
+  }
+  #board .piece{ z-index:6 !important; }
+  #board.board3d .piece.piece3d,
+  #board.board3d .piece.piece-vec{ z-index:6 !important; }
+  #board-bright-block input[type="range"]{ width:100%; display:block; margin-top:8px; height:22px; }
+  /* Square lightness — final approach.
+     ::after did not reach every square: some squares already use that
+     pseudo-element for their own decoration, so the tint appeared on part of
+     the board only. An inset box-shadow is a single property on the square
+     itself, painted over its background and under its children, so it cannot
+     be skipped by any square. Highlight rings keep their own shadows. */
+  #board .sq:not(.legal):not(.selected):not(.lastmove-from):not(.lastmove-to){
+    box-shadow: inset 0 0 0 9999px var(--board-tint, transparent);
+  }
+  #board .piece{ z-index:6; }
+  #board-bright-block input[type="range"]{ width:100%; display:block; margin-top:8px; height:22px; }
 </style>
 </head>
 <body>
