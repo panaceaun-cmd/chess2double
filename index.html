@@ -4053,7 +4053,21 @@
         if(o && isFinite(o.contrast) && isFinite(o.outline)) d = o;
       }
     }catch(e){}
-    if(!d) d = STYLE_LOOK_DEFAULTS[n] || STYLE_LOOK_FALLBACK;
+    // Nothing saved for this style: only 3D Classic has an opinion of its own,
+    // and even that is applied ONCE, the first time the style is ever chosen.
+    // Re-applying it on every selection kept overwriting the look of the
+    // pieces by itself — switching the board between 2D and 3D changes the
+    // style, so the contrast and outline were being reset behind the player's
+    // back on every switch.
+    if(!d){
+      const onceKey = 'chess2-look-applied-' + n;
+      let already = false;
+      try{ already = localStorage.getItem(onceKey) === '1'; }catch(e){}
+      if(already) return;
+      d = STYLE_LOOK_DEFAULTS[n];
+      if(!d) return;
+      try{ localStorage.setItem(onceKey, '1'); }catch(e){}
+    }
     try{
       // Same keys and same helpers the sliders themselves use, so the value,
       // the control and the saved setting never drift apart.
