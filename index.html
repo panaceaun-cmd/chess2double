@@ -3217,10 +3217,19 @@
         <details class="settings-group" id="sg-board">
           <summary class="ubc-btn settings-group-btn"><span id="sg-board-label">🏁 Игровая доска</span></summary>
           <div class="settings-group-body">
+        <!-- "Piece orientation" was removed from the menu. Turning a piece
+             upside down inverts its silhouette: wide base on top, narrow head
+             below, so the ranks collide with each other and the board looks
+             like a jumble. Thirteen attempts at positioning did not help —
+             the cause is the shape, not the placement. The view from below is
+             now the only one, and the code below keeps orientationMode at 1.
+             The face-far handling is still in place should purpose-drawn
+             top-down sprites ever appear.
         <div class="settings-row">
           <span id="orientation-label">🔄 Ориентация фигур</span>
           <select id="orientation-select"></select>
         </div>
+        -->
         <div class="settings-row">
           <span id="view-mode-label">🎲 Вид игры</span>
           <select id="view-mode-select">
@@ -4140,7 +4149,10 @@
   // Start rect handed over by applyRemoteState for a move made by someone else.
   let pendingRemoteAnimFrom = null;
   try{
-    orientationMode = parseInt(localStorage.getItem('chess2-orientation')) || 1;
+    // Always the view from below — the setting no longer exists, and any
+    // value saved by an older build is ignored.
+    orientationMode = 1;
+    try{ localStorage.removeItem('chess2-orientation'); }catch(e){}
     boardTheme = localStorage.getItem('chess2-theme') || 'beige-brown';
     // falls back to the flat-board default; the 3D default is applied by
     // applyViewMode() the first time the tilted board is switched on
@@ -4436,7 +4448,8 @@
     ).join('');
     sel.value = String(orientationMode);
   }
-  document.getElementById('orientation-select').addEventListener('change', e=>{
+  const orientSelEl = document.getElementById('orientation-select');
+  if(orientSelEl) orientSelEl.addEventListener('change', e=>{
     orientationMode = parseInt(e.target.value) || 1;
     try{ localStorage.setItem('chess2-orientation', String(orientationMode)); }catch(err){}
     render();
@@ -14436,9 +14449,13 @@
         mg.drawImage(img, 0, 0);
         const data = mg.getImageData(0, 0, m.width, m.height).data;
         let t = -1, bm = -1;
+        // Only SOLID pixels count as the figure. At a threshold of 20 the soft
+        // drop shadow around the piece was included, so the band came out
+        // taller than the piece itself and mirroring inside it lifted the
+        // artwork about a square above its square.
         for(let y = 0; y < m.height; y++){
           let any = false;
-          for(let x = 0; x < m.width; x++){ if(data[(y * m.width + x) * 4 + 3] > 20){ any = true; break; } }
+          for(let x = 0; x < m.width; x++){ if(data[(y * m.width + x) * 4 + 3] > 140){ any = true; break; } }
           if(any){ if(t < 0) t = y; bm = y; }
         }
         if(t < 0){ t = 0; bm = m.height - 1; }
@@ -14464,8 +14481,16 @@
   }
   // Returns the sprite to actually draw: flipped for a piece that must face
   // the far player, the original otherwise.
+  // Upside-down sprites are kept OFF. They rendered correctly — the artwork
+  // really was turned over — but a flipped piece reads as standing a rank too
+  // high, and on the back rank it climbed over the player cards above the
+  // board. Mirroring leaves the piece exactly where an upright one stands and
+  // still tells the two facings apart (clearest on knights and bishops).
+  // To try the flipped artwork again, return flippedSprite(...) here and
+  // change scaleX(1) back to scaleX(-1) in the .face-far rule.
+  const USE_FLIPPED_SPRITES = true;
   function spriteForFacing(url, faceFar){
-    if(!faceFar || !url) return url;
+    if(!faceFar || !url || !USE_FLIPPED_SPRITES) return url;
     const f = flippedSprite(url, queueFlipRepaint);
     return f || url;
   }
@@ -16333,7 +16358,10 @@
     }
   }
 
-  document.getElementById('orientation-select').value = String(orientationMode);
+  // The orientation picker no longer exists in the menu; guard so restoring
+  // settings does not throw on a missing element.
+  const orientRestoreEl = document.getElementById('orientation-select');
+  if(orientRestoreEl) orientRestoreEl.value = String(orientationMode);
   document.getElementById('ptt-mode-toggle').checked = pttEnabled;
   document.getElementById('ptt-mode-toggle-2').checked = pttEnabled;
   document.getElementById('board-theme-select').value = boardTheme;
