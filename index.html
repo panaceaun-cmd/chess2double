@@ -4205,6 +4205,9 @@
   let lastAnimatedMoveRef = null;
   // Start rect handed over by applyRemoteState for a move made by someone else.
   let pendingRemoteAnimFrom = null;
+  // Set just before a redraw to make the piece travel backwards, from where it
+  // stands to where it came from. Consumed by the next render() and cleared.
+  let pendingReturnAnim = null;
   try{
     // Always the view from below — the setting no longer exists, and any
     // value saved by an older build is ignored.
@@ -10652,6 +10655,14 @@
     // undo, so all four stacks stay identical and undo can walk all the way
     // back to the opening position.
     const remoteUndoSeq = room.undoSeq || 0;
+    // Somebody else took a move back. Their piece has to be seen travelling
+    // home here too, exactly as it does for the player who pressed the button.
+    // The flying copy is photographed now, while the board still shows where
+    // the piece stands, and released after the redraw.
+    let remoteUndoVisual = null;
+    if(remoteUndoSeq > onlineUndoSeq){
+      try{ remoteUndoVisual = captureUndoVisual(); }catch(e){ remoteUndoVisual = null; }
+    }
     if(remoteUndoSeq > onlineUndoSeq){
       // somebody's undo was agreed: drop the snapshot it rewound past
       for(let i = onlineUndoSeq; i < remoteUndoSeq; i++) history.pop();
@@ -10704,6 +10715,13 @@
     turn = TURN_ORDER[turnIndex];
     enPassant = room.enPassant;
     lastMove = room.lastMove;
+    // render() animates only a move it has not animated before, and it decides
+    // that by identity. Anything that redrew the board between this state
+    // arriving and this line could have claimed the move already — and then the
+    // piece appears at its destination having travelled nowhere. Clearing the
+    // mark makes the next redraw treat it as what it is: a move nobody on this
+    // screen has seen yet.
+    if(lastMove && lastMove.from && lastMove.to) lastAnimatedMoveRef = null;
     if(room.timers) timers = room.timers;
     if(room.capturedFrom){ capturedFrom = room.capturedFrom; renderCapturedPanel(); }
     if(room.takenOverBy) takenOverBy = room.takenOverBy;
@@ -10761,7 +10779,15 @@
     const wasGameOver = gameOver;
     gameOver = room.gameOver;
     selected = null; legalMoves = [];
+    if(remoteUndoVisual && remoteUndoVisual.from && remoteUndoVisual.to){
+      // Somebody else's take-back travels on this screen too.
+      lastAnimatedMoveRef = lastMove;
+      pendingReturnAnim = {from: {r: remoteUndoVisual.to.r, c: remoteUndoVisual.to.c},
+                           to:   {r: remoteUndoVisual.from.r, c: remoteUndoVisual.from.c},
+                           capture: false};
+    }
     render();
+
     updateStatus();
     renderTimers();
     announceLastMove();
@@ -15817,9 +15843,16 @@
     // for why lastMove is compared by reference here.
     let animateFromRect = null;
     let capturedWasFaceFar = '';
-    const isNewMove = !!(lastMove && lastMove !== lastAnimatedMoveRef);
+    // A move that has not been shown yet, or a take-back asking for the same
+    // travel in reverse. Both are drawn by the block near the end of render().
+    const returnAnim = pendingReturnAnim;
+    pendingReturnAnim = null;
+    const isNewMove = !!returnAnim || !!(lastMove && lastMove !== lastAnimatedMoveRef);
+    // Everything below that animates reads animMove, not lastMove, so a
+    // take-back can borrow the same machinery without a real move existing.
+    const animMove = returnAnim || lastMove;
     if(isNewMove){
-      const fromSq = boardEl.querySelector('.sq[data-r="' + lastMove.from.r + '"][data-c="' + lastMove.from.c + '"]');
+      const fromSq = boardEl.querySelector('.sq[data-r="' + animMove.from.r + '"][data-c="' + animMove.from.c + '"]');
       if(fromSq){
         const rect = fromSq.getBoundingClientRect();
         if(rect.width > 0 && rect.height > 0) animateFromRect = rect;
@@ -15828,8 +15861,8 @@
       // swapped the board, so use that if we could not take one ourselves.
       if(!animateFromRect && pendingRemoteAnimFrom) animateFromRect = pendingRemoteAnimFrom;
       pendingRemoteAnimFrom = null;
-      if(lastMove.capture){
-        const toSqBefore = boardEl.querySelector('.sq[data-r="' + lastMove.to.r + '"][data-c="' + lastMove.to.c + '"]');
+      if(animMove.capture){
+        const toSqBefore = boardEl.querySelector('.sq[data-r="' + animMove.to.r + '"][data-c="' + animMove.to.c + '"]');
         const capturedPieceEl = toSqBefore ? toSqBefore.querySelector('.piece') : null;
         // carry over whichever orientation class the real piece had, so the
         // ghost doesn't snap upright (or upside down) the moment it spawns
@@ -16013,15 +16046,19 @@
     }
 
     if(isNewMove){
-      lastAnimatedMoveRef = lastMove;
-      if(lastMove.capture) playSwordDrawSound(); else playKnockSound();
-      const toSq = boardEl.querySelector('.sq[data-r="' + lastMove.to.r + '"][data-c="' + lastMove.to.c + '"]');
+      // A take-back is not a move: it must not be recorded as one, and it
+      // must not sound like a piece landing.
+      if(!returnAnim){
+        lastAnimatedMoveRef = lastMove;
+        if(lastMove.capture) playSwordDrawSound(); else playKnockSound();
+      }
+      const toSq = boardEl.querySelector('.sq[data-r="' + animMove.to.r + '"][data-c="' + animMove.to.c + '"]');
       const toPieceEl = toSq ? toSq.querySelector('.piece') : null;
       if(toSq && toPieceEl){
         const toRect = toSq.getBoundingClientRect();
         let capturedGhostEl = null;
-        if(lastMove.capture && toRect.width > 0 && toRect.height > 0){
-          capturedGhostEl = spawnStandingCapturedGhost(toSq, lastMove, capturedWasFaceFar);
+        if(animMove.capture && toRect.width > 0 && toRect.height > 0){
+          capturedGhostEl = spawnStandingCapturedGhost(toSq, animMove, capturedWasFaceFar);
           // Safety net: whatever happens to the attacker's own animation
           // downstream, this guarantees the ghost's fall eventually
           // triggers rather than being stuck standing forever. Real
@@ -16030,7 +16067,7 @@
           const thisGhost = capturedGhostEl;
           setTimeout(() => {
             if(thisGhost.parentNode && !thisGhost.dataset.fallTriggered){
-              triggerCaptureKickFall(null, thisGhost, lastMove);
+              triggerCaptureKickFall(null, thisGhost, animMove);
             }
           }, 10000);
         }
@@ -16045,10 +16082,10 @@
           // for .flip180, and would have been wrong under a 3D tilt, where
           // on-screen distance is foreshortened and varies row by row.
           const sqPx = toSq.offsetWidth || toRect.width;
-          const dx = (lastMove.from.c - lastMove.to.c) * sqPx;
-          const dy = (lastMove.from.r - lastMove.to.r) * sqPx;
+          const dx = (animMove.from.c - animMove.to.c) * sqPx;
+          const dy = (animMove.from.r - animMove.to.r) * sqPx;
           if(dx !== 0 || dy !== 0){
-            const distSquares = Math.hypot(lastMove.to.r - lastMove.from.r, lastMove.to.c - lastMove.from.c);
+            const distSquares = Math.hypot(animMove.to.r - animMove.from.r, animMove.to.c - animMove.from.c);
             const durationMs = Math.max(80, (distSquares / 2) * 1000); // 2 squares/second
             // A piece already carries base transforms of its own (the 180°
             // flip for far-facing pieces, plus the stand-up rotation in 3D
@@ -16092,21 +16129,21 @@
               toPieceEl.style.transform = view3D ? pieceBaseTransform(toPieceEl).trim() : '';
               if(setPosition) toPieceEl.style.position = '';
               toPieceEl.style.zIndex = '';
-              if(lastMove.capture && capturedGhostEl){
-                triggerCaptureKickFall(toPieceEl, capturedGhostEl, lastMove);
+              if(animMove.capture && capturedGhostEl){
+                triggerCaptureKickFall(toPieceEl, capturedGhostEl, animMove);
               } else {
                 playKnockSound();
               }
             }, {once:true});
-          } else if(lastMove.capture && capturedGhostEl){
+          } else if(animMove.capture && capturedGhostEl){
             // attacker had nothing to visually travel — trigger the fall
             // immediately instead of leaving the ghost standing forever
-            triggerCaptureKickFall(toPieceEl, capturedGhostEl, lastMove);
+            triggerCaptureKickFall(toPieceEl, capturedGhostEl, animMove);
           }
-        } else if(lastMove.capture && capturedGhostEl){
+        } else if(animMove.capture && capturedGhostEl){
           // attacker's own old position couldn't be captured — no travel
           // animation to wait for, so trigger the fall immediately
-          triggerCaptureKickFall(toPieceEl, capturedGhostEl, lastMove);
+          triggerCaptureKickFall(toPieceEl, capturedGhostEl, animMove);
         }
       }
     }
@@ -17536,11 +17573,17 @@
     showMoveToast(mainTxt, nextTxt);
     updateTicker(mainTxt, nextTxt);
     popHistoryLog();
+    // Send the piece back the way it came, using the same travel the forward
+    // move used. The old flying-copy trick is left in place underneath.
+    if(undoVisual && undoVisual.from && undoVisual.to){
+      pendingReturnAnim = {from: {r: undoVisual.to.r, c: undoVisual.to.c},
+                           to:   {r: undoVisual.from.r, c: undoVisual.from.c},
+                           capture: false};
+    }
     render();
     // The restored lastMove is a fresh object, so render() would otherwise
     // treat the PREVIOUS move as brand new and animate it forwards again.
     lastAnimatedMoveRef = lastMove;
-    playUndoVisual(undoVisual);
     updateStatus();
     renderTimers();
     if(onlineRoomId){
