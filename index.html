@@ -10147,6 +10147,9 @@
 
   async function checkOpponentPresence(){
     if(!onlineRoomId || gameOver) return;
+    // While the table runs on its own there is nothing to read here, and a
+    // stale copy must never be read as "they left".
+    if(roomStoreActive) return;
     if(onlineMaxPlayers <= 2){
       // exactly the original 2-player behavior, unchanged
       if(opponentDisconnectDeclared) return;
@@ -11872,6 +11875,12 @@
   // entirely. A private call is now allowed from anywhere; if the other side
   // is in a game, their shared voice pauses for the duration (see below).
   async function callFriend(targetNick){
+    // A call is agreed through the database, so the database has to be there.
+    // The table goes back on it for as long as the call lasts; it will let go
+    // again by itself once the call is over.
+    autonomyHeldForVoice = true;
+    if(roomStoreActive) returnTethered('голосовой звонок');
+    announceAutonomyReadiness();
     // The refusal used to be silent: press the handset, nothing happens, no
     // hint anywhere. Worst of all, a leftover activeDirectCall from an earlier
     // attempt that was never cleaned up blocked EVERY later call until the page
@@ -12560,6 +12569,12 @@
   }
   async function startVoiceChatInternal(){
     if(!onlineRoomId || !STORAGE_OK || voiceActive) return;
+    // A call is agreed through the database, so the database has to be there.
+    // The table goes back on it for as long as the call lasts; it will let go
+    // again by itself once the call is over.
+    autonomyHeldForVoice = true;
+    if(roomStoreActive) returnTethered('голосовой звонок');
+    announceAutonomyReadiness();
     if(typeof RTCPeerConnection === 'undefined' || !window.crypto || !window.crypto.subtle) return;
     try{
       voiceLocalStream = await navigator.mediaDevices.getUserMedia({audio: VOICE_AUDIO_CONSTRAINTS});
@@ -13124,8 +13139,14 @@
       isActive: () => roomStoreActive,
       // Turns the whole thing on for this session only — for trying it on two
       // real devices before it becomes the default.
+      releaseVoiceHold: () => {
+        autonomyHeldForVoice = false;
+        announceAutonomyReadiness();
+        setTimeout(() => { try{ goAutonomous(); }catch(e){} }, 800);
+      },
       tryAutonomy: (on) => {
         AUTONOMY_ENABLED = !!on;
+        try{ announceAutonomyReadiness(); }catch(e){}
         if(on){ try{ goAutonomous(); }catch(e){} }
         else { try{ returnTethered('выключено вручную'); }catch(e){} }
         return {enabled: AUTONOMY_ENABLED, active: roomStoreActive};
@@ -13133,6 +13154,8 @@
       status: () => ({
         enabled: AUTONOMY_ENABLED,
         active: roomStoreActive,
+        peersReady: Object.assign({}, peerAutonomyReady),
+        heldForVoice: autonomyHeldForVoice,
         sinceMs: autonomySince ? (Date.now() - autonomySince) : 0,
         channels: (typeof moveSeats === 'function' ? moveSeats() : [])
           .map(s => s + ':' + ((moveChannels[s] && moveChannels[s].readyState) || 'нет'))
@@ -13140,14 +13163,24 @@
       _activate: (on) => { roomStoreActive = !!on; },
       _ref: netRef,
       _receive: handleRoomStoreMessage,
+      // Test hook: the same two steps the channel's own handler takes for a
+      // tagged message, so a check exercises the real path and not a copy.
+      _receiveFromSeat: (seat, raw) => {
+        let data; try{ data = JSON.parse(raw); }catch(e){ return false; }
+        if(data && typeof data === 'object' && data.__auto){ data.__seat = seat; }
+        if(handleAutonomyMessage(data)) return true;
+        return handleRoomStoreMessage(data);
+      },
       _snapshot: roomStoreSnapshot,
       _applySnapshot: applyRoomStoreSnapshot,
       _dump: () => Object.assign({}, roomStore),
       // Test hook: stands in for a player at the table whose channel is open,
       // so the shared store can be exercised without two real devices. Does
       // nothing in normal play — nothing calls it.
-      _attachTestPeer: (seat, sendFn) => {
-        if(!onlineSide) onlineSide = 'p1';
+      _attachTestPeer: (seat, sendFn, roomId, mySeat) => {
+        if(roomId){ onlineRoomId = roomId; onlineWaitingOnly = false; onlineMaxPlayers = 2; }
+        onlineSide = mySeat || onlineSide || 'p1';
+        onlinePlayers[onlineSide] = onlinePlayers[onlineSide] || 'me';
         onlinePlayers[seat] = onlinePlayers[seat] || ('peer-' + seat);
         moveChannels[seat] = { readyState: 'open', send: sendFn };
       }
@@ -13168,6 +13201,38 @@
   // for the current session so it can be tried without editing the file.
   let AUTONOMY_ENABLED = false;
   let autonomySince = 0;
+  // Letting go of the database is a decision for the whole table, never for one
+  // player. If one side goes and the other stays, the one that stayed keeps
+  // waiting for a heartbeat that will never come and declares its opponent
+  // gone — which is exactly what happened on the first live test. So each side
+  // states whether it is willing, and nobody goes until everyone has said yes.
+  const AUTONOMY_TAG = '__auto';
+  const peerAutonomyReady = {};      // seat -> true/false as reported by that player
+  let autonomyHeldForVoice = false;  // a call is up: the database has to stay
+
+  function announceAutonomyReadiness(){
+    const msg = JSON.stringify({[AUTONOMY_TAG]: 1, ready: !!AUTONOMY_ENABLED && !autonomyHeldForVoice});
+    const seats = (typeof moveSeats === 'function') ? moveSeats() : [];
+    seats.forEach(seat => {
+      const ch = moveChannels[seat];
+      if(ch && ch.readyState === 'open'){ try{ ch.send(msg); }catch(e){} }
+    });
+  }
+  // Returns true if the message was this negotiation and has been dealt with.
+  function handleAutonomyMessage(data){
+    if(!data || typeof data !== 'object' || !data[AUTONOMY_TAG]) return false;
+    // The channel itself does not name the sender, so the seat is attached
+    // where the message arrives, one channel per player.
+    if(data.__seat) peerAutonomyReady[data.__seat] = !!data.ready;
+    if(!data.ready && roomStoreActive) returnTethered('соперник вернулся к базе');
+    else if(data.ready) setTimeout(() => { try{ goAutonomous(); }catch(e){} }, 300);
+    return true;
+  }
+  function everyoneReadyForAutonomy(){
+    const seats = (typeof moveSeats === 'function') ? moveSeats() : [];
+    if(!seats.length) return false;
+    return seats.every(s => peerAutonomyReady[s] === true);
+  }
 
   function allChannelsOpen(){
     const seats = (typeof moveSeats === 'function') ? moveSeats() : [];
@@ -13188,12 +13253,21 @@
   }
   function goAutonomous(){
     if(!AUTONOMY_ENABLED || !ROOM_STORE_ENABLED) return;
+    if(autonomyHeldForVoice) return;
     if(roomStoreActive || !inLiveGame() || !allChannelsOpen()) return;
+    if(!everyoneReadyForAutonomy()){ announceAutonomyReadiness(); return; }
     // One last complete board into the database before letting go of it, so a
     // player who reloads has something recent to land on.
     try{ if(typeof pushRoomState === 'function') pushRoomState(true); }catch(e){}
     roomStoreActive = true;
     autonomySince = Date.now();
+    // The heartbeat and the "is my opponent still here" check both read the
+    // database. With the database gone they would read nothing and conclude
+    // the opponent had vanished — while sitting on an open direct link to
+    // them. The link is the better answer, so those two stand down.
+    try{ stopRoomPresence(); }catch(e){}
+    try{ hideDisconnectNotice(); }catch(e){}
+    opponentDisconnectDeclared = false;
     reattachRoomListeners();
     netSocketOff('партия идёт напрямую');
     vlog('СТОЛ: работаем без базы, соединение отдано');
@@ -13204,7 +13278,10 @@
     roomStoreActive = false;
     autonomySince = 0;
     netSocketOn('вернулись к базе: ' + (why || ''));
+    // Back on the database, so the ordinary presence machinery takes over again.
+    try{ if(inLiveGame()) startRoomPresence(); }catch(e){}
     reattachRoomListeners();
+    announceAutonomyReadiness();
     try{ if(typeof pushRoomState === 'function') pushRoomState(true); }catch(e){}
     vlog('СТОЛ: вернулись к базе — ' + (why || ''));
     updateAutonomyBadge();
@@ -13225,12 +13302,15 @@
     moveChannels[seat] = ch;
     ch.onopen = () => {
       vlog('ХОДЫ: канал с ' + seat + ' открыт');
-      // Give the last link a moment to settle before letting go of the database.
+      // Say whether we are willing, and let the other side say the same. The
+      // switch happens only when both have.
+      setTimeout(() => { try{ announceAutonomyReadiness(); }catch(e){} }, 300);
       setTimeout(() => { try{ goAutonomous(); }catch(e){} }, 1500);
     };
     ch.onclose = () => {
       vlog('ХОДЫ: канал с ' + seat + ' закрыт');
       delete moveChannels[seat];
+      delete peerAutonomyReady[seat];
       // Somebody's direct link is gone — they may be reloading, changing
       // network or simply leaving. Whatever it is, the database has to be
       // there to meet them.
@@ -13240,6 +13320,10 @@
       let room; try{ room = JSON.parse(ev.data); }catch(e){ return; }
       // The channel now carries two kinds of message: a board, and a change to
       // the table's shared data. Tagged messages are taken out here first.
+      // Tag the message with the seat it came in on, so the negotiation knows
+      // who said it — the channel itself carries no sender.
+      if(room && typeof room === 'object' && room.__auto){ room.__seat = seat; }
+      if(handleAutonomyMessage(room)) return;
       if(handleRoomStoreMessage(room)) return;
       // Same guard the Firebase listener uses, so the two paths converge
       // whichever arrives first.
@@ -13421,6 +13505,12 @@
 
   async function startGroupVoice(){
     if(groupVoiceActive || !onlineRoomId) return;
+    // A call is agreed through the database, so the database has to be there.
+    // The table goes back on it for as long as the call lasts; it will let go
+    // again by itself once the call is over.
+    autonomyHeldForVoice = true;
+    if(roomStoreActive) returnTethered('голосовой звонок');
+    announceAutonomyReadiness();
     if(typeof RTCPeerConnection === 'undefined' || !window.crypto || !window.crypto.subtle) return;
     const statusEl = document.getElementById('voice-chat-status');
     try{
