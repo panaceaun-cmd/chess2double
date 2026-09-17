@@ -8034,6 +8034,9 @@
   function refreshLobbyNow(){
     const btn = document.getElementById('online-refresh-btn');
     if(btn){ btn.disabled = true; setTimeout(() => { btn.disabled = false; }, PRESENCE_MIN_GAP_MS); }
+    // Somebody pressing refresh wants to see who is there, not a list trimmed
+    // down to their own friends — so the full list opens with it.
+    onlineListExpanded = true;
     restRefreshPresenceList(true);
     pollLobbyChat();
   }
@@ -18373,5 +18376,3 @@
 </script>
 </body>
 </html>
-
-  
