@@ -7726,6 +7726,134 @@
   // slashes), so every call site elsewhere in the file keeps working unchanged.
   function fbPath(key){ return key.replace(/:/g, '/'); }
 
+  // ================= DATABASE OVER PLAIN REQUESTS =================
+  // Why this exists: the SDK holds one permanent socket per open tab, and the
+  // free plan allows a hundred of those at a time — so a hundred tabs is the
+  // hard ceiling no matter how little traffic each of them makes. A plain HTTP
+  // request holds nothing: it is answered and forgotten. Moving everything that
+  // happens OUTSIDE a game onto requests frees the socket for the few seconds
+  // when it is genuinely needed (agreeing a direct connection), and the same
+  // hundred slots then serve thousands of players in turn.
+  //
+  // This block is transport only. Nothing calls it yet: storeGet and friends
+  // still go through the SDK exactly as before, and REST_ENABLED below is what
+  // will switch them over once the rest of the work lands.
+  const REST_ENABLED = false;
+  const REST_BASE = (FIREBASE_CONFIG && FIREBASE_CONFIG.databaseURL) ? String(FIREBASE_CONFIG.databaseURL).replace(/\/+$/, '') : null;
+  const REST_TIMEOUT_MS = 12000;
+
+  function restUrl(path, query){
+    const clean = String(path || '').replace(/^\/+/, '').replace(/\/+$/, '');
+    let url = REST_BASE + '/' + clean + '.json';
+    if(query) url += (url.indexOf('?') === -1 ? '?' : '&') + query;
+    return url;
+  }
+  // Every request gets a deadline of its own. Without one a stalled mobile
+  // connection leaves the caller waiting forever, and the lobby simply stops
+  // updating with no error anywhere.
+  async function restFetch(url, options){
+    const opts = Object.assign({cache: 'no-store'}, options || {});
+    let timer = null;
+    if(typeof AbortController !== 'undefined'){
+      const ctrl = new AbortController();
+      opts.signal = ctrl.signal;
+      timer = setTimeout(() => { try{ ctrl.abort(); }catch(e){} }, REST_TIMEOUT_MS);
+    }
+    try{
+      return await fetch(url, opts);
+    } finally {
+      if(timer) clearTimeout(timer);
+    }
+  }
+  // Returns the stored value, or null for "nothing there". Throws only on a
+  // real network/HTTP failure, so callers can tell "empty" from "unreachable".
+  async function restGet(path, query){
+    const res = await restFetch(restUrl(path, query));
+    if(!res.ok) throw new Error('GET ' + path + ' -> ' + res.status);
+    const val = await res.json();
+    return (val === null || val === undefined) ? null : val;
+  }
+  async function restSet(path, value){
+    const res = await restFetch(restUrl(path, 'print=silent'), {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(value === undefined ? null : value)
+    });
+    if(!res.ok) throw new Error('PUT ' + path + ' -> ' + res.status);
+    return true;
+  }
+  // Merges the given fields into whatever is already at the path, leaving the
+  // rest of it alone — the request-side equivalent of ref().update().
+  async function restUpdate(path, obj){
+    const res = await restFetch(restUrl(path, 'print=silent'), {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(obj || {})
+    });
+    if(!res.ok) throw new Error('PATCH ' + path + ' -> ' + res.status);
+    return true;
+  }
+  async function restDelete(path){
+    const res = await restFetch(restUrl(path, 'print=silent'), {method: 'DELETE'});
+    if(!res.ok) throw new Error('DELETE ' + path + ' -> ' + res.status);
+    return true;
+  }
+  // Keys only, without dragging every child's contents across the network.
+  async function restListKeys(path){
+    const val = await restGet(path, 'shallow=true');
+    return val ? Object.keys(val) : [];
+  }
+
+  // The request API has no transaction, but it does have conditional writes:
+  // a read hands back a version tag, and a write can be made to apply only
+  // while that tag still matches. Looping over that gives the same guarantee
+  // the SDK's transaction gives — two people cannot both take the last seat.
+  const REST_TXN_ATTEMPTS = 6;
+  // allowUnguarded: for data where a lost race costs nothing (a chat line, a
+  // heartbeat). Anything where two people could claim the same thing — a seat,
+  // a queue entry — must leave it off and handle {guarded:false} as a failure,
+  // because an unconditional write there silently throws away somebody's move.
+  async function restTransaction(path, updateFn, allowUnguarded){
+    for(let attempt = 0; attempt < REST_TXN_ATTEMPTS; attempt++){
+      const readRes = await restFetch(restUrl(path), {headers: {'X-Firebase-ETag': 'true'}});
+      if(!readRes.ok) throw new Error('GET ' + path + ' -> ' + readRes.status);
+      // The version tag only reaches us if the server lets the browser read
+      // that header. If it does not, we cannot make the write conditional, and
+      // pretending otherwise would be worse than saying so.
+      const etag = readRes.headers.get('ETag');
+      if(!etag && !allowUnguarded) return {committed: false, value: null, guarded: false};
+      let current = await readRes.json();
+      if(current === undefined) current = null;
+      const next = updateFn(current);
+      // Returning undefined means "leave it alone" — same convention the SDK uses.
+      if(next === undefined) return {committed: false, value: current, guarded: !!etag};
+      const headers = {'Content-Type': 'application/json'};
+      if(etag) headers['if-match'] = etag;
+      const writeRes = await restFetch(restUrl(path), {
+        method: 'PUT', headers, body: JSON.stringify(next === undefined ? null : next)
+      });
+      if(writeRes.ok) return {committed: true, value: next, guarded: !!etag};
+      // 412 means somebody wrote between our read and our write. Read the
+      // fresh value and decide again — that is the whole point of the loop.
+      if(writeRes.status !== 412) throw new Error('PUT ' + path + ' -> ' + writeRes.status);
+    }
+    return {committed: false, value: null, contended: true, guarded: true};
+  }
+
+  // Exposed on purpose, and only this. It lets the transport be exercised
+  // against a real database from the browser console before anything depends
+  // on it, and it is what the automated check drives.
+  try{
+    window.CHESS2_NET = {
+      enabled: REST_ENABLED,
+      base: REST_BASE,
+      url: restUrl,
+      get: restGet, set: restSet, update: restUpdate, del: restDelete,
+      listKeys: restListKeys, transaction: restTransaction
+    };
+  }catch(e){}
+  // ================= END DATABASE OVER PLAIN REQUESTS =================
+
   async function storeGet(key, shared){
     if(!shared){
       // personal data: localStorage is the reliable source of truth (works everywhere,
