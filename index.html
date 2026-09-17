@@ -7738,7 +7738,7 @@
   // This block is transport only. Nothing calls it yet: storeGet and friends
   // still go through the SDK exactly as before, and REST_ENABLED below is what
   // will switch them over once the rest of the work lands.
-  const REST_ENABLED = false;
+  const REST_ENABLED = true;
   const REST_BASE = (FIREBASE_CONFIG && FIREBASE_CONFIG.databaseURL) ? String(FIREBASE_CONFIG.databaseURL).replace(/\/+$/, '') : null;
   const REST_TIMEOUT_MS = 12000;
 
@@ -7854,6 +7854,191 @@
   }catch(e){}
   // ================= END DATABASE OVER PLAIN REQUESTS =================
 
+  // ================= LOBBY WITHOUT A SOCKET =================
+  // The socket is what costs a slot out of the hundred, and it is held from
+  // the moment the page opens until it closes — including all the time spent
+  // just looking at who is online. Everything that happens outside a game now
+  // goes over requests, and the socket is opened only when a game or a call
+  // needs it and closed again afterwards. Set to false to go back to the old
+  // behaviour in one step.
+  const LOBBY_OVER_REST = true;
+
+  // Checked rarely and cheaply: a request costs nothing when nothing happened,
+  // but it is not free either, so the intervals are deliberately long. The
+  // trade is stated plainly: an incoming invite or friend call is noticed
+  // within these many seconds rather than instantly.
+  const POLL_PRESENCE_MS   = 12000;
+  const POLL_CHAT_MS       = 7000;
+  const POLL_INVITE_MS     = 8000;
+  const POLL_CALL_MS       = 8000;
+  const POLL_MATCH_MS      = 4000;
+  // A record is refreshed this often and treated as gone after the timeout.
+  // Without a socket there is no server-side "delete when they vanish", so
+  // presence has to expire on its own.
+  const PRESENCE_REFRESH_MS = 60000;
+  const PRESENCE_TTL_MS     = 180000;
+
+  let socketWanted = false;
+  // Opening and closing the SDK's connection is what actually frees the slot.
+  // goOffline/goOnline are cheap and idempotent; the guard is only to avoid
+  // pointless churn.
+  function netSocketOn(why){
+    if(!fbDb || !LOBBY_OVER_REST) return;
+    if(socketWanted) return;
+    socketWanted = true;
+    try{ fbDb.goOnline(); vlog('СЕТЬ: соединение открыто — ' + (why || '')); }catch(e){}
+    try{ startGlobalReconnectWatcher(); }catch(e){}
+  }
+  function netSocketOff(why){
+    if(!fbDb || !LOBBY_OVER_REST) return;
+    if(!socketWanted && netSocketOff.everCalled) return;
+    netSocketOff.everCalled = true;
+    socketWanted = false;
+    try{ fbDb.goOffline(); vlog('СЕТЬ: соединение закрыто — ' + (why || '')); }catch(e){}
+  }
+  netSocketOff.everCalled = false;
+  function inLiveGame(){ return !!(onlineRoomId && !onlineWaitingOnly); }
+
+  // ---- presence ----
+  let presencePollTimer = null, presenceBeatTimer = null;
+  function presenceRecord(){
+    return JSON.stringify({lang: currentLang, flag: myFlagCode, ts: Date.now()});
+  }
+  async function restWriteMyPresence(){
+    if(!myNick) return;
+    try{ await restSet('presence/' + myNick, presenceRecord()); }
+    catch(e){ vlog('ЛОББИ: присутствие не записалось — ' + (e && e.message)); }
+  }
+  // Leaving the page cannot wait for a normal request to finish, so this one is
+  // marked to survive the page going away. It is best effort: if it does not
+  // land, the record expires by itself within PRESENCE_TTL_MS.
+  function restDropMyPresence(){
+    if(!myNick || !REST_BASE) return;
+    try{ fetch(restUrl('presence/' + myNick, 'print=silent'), {method:'DELETE', keepalive:true}); }catch(e){}
+  }
+  function parsePresenceValue(raw){
+    if(!raw) return null;
+    if(typeof raw === 'string'){ try{ return JSON.parse(raw); }catch(e){ return null; } }
+    return raw;
+  }
+  async function restRefreshPresenceList(){
+    let val = null;
+    try{ val = await restGet('presence'); }
+    catch(e){ return; }   // a failed poll changes nothing; the next one tries again
+    const now = Date.now();
+    const fresh = {};
+    Object.keys(val || {}).forEach(nick => {
+      const rec = parsePresenceValue(val[nick]);
+      if(!rec) return;
+      // Records written by the older socket version carry no timestamp. The
+      // server still removes those when their socket drops, so they are taken
+      // at face value instead of being treated as stale.
+      if(rec.ts && (now - rec.ts) > PRESENCE_TTL_MS) return;
+      fresh[nick] = rec;
+    });
+    onlinePresence = fresh;
+    renderOnlineFromCache();
+    renderFriendsList();
+  }
+  function startLobbyPolling(){
+    if(!LOBBY_OVER_REST || !REST_BASE || !myNick) return;
+    stopLobbyPolling();
+    restWriteMyPresence();
+    restRefreshPresenceList();
+    presenceBeatTimer = setInterval(() => { if(!inLiveGame()) restWriteMyPresence(); }, PRESENCE_REFRESH_MS);
+    presencePollTimer = setInterval(() => { if(!inLiveGame()) restRefreshPresenceList(); }, POLL_PRESENCE_MS);
+    startRestChatPolling();
+    startRestInvitePolling();
+    startRestCallPolling();
+  }
+  // Called the moment a game starts: a player at the board asks the database
+  // for nothing at all.
+  function stopLobbyPolling(){
+    if(presencePollTimer){ clearInterval(presencePollTimer); presencePollTimer = null; }
+    if(presenceBeatTimer){ clearInterval(presenceBeatTimer); presenceBeatTimer = null; }
+    stopRestChatPolling();
+    stopRestInvitePolling();
+    stopRestCallPolling();
+  }
+
+  // ---- lobby chat ----
+  let chatPollTimer = null;
+  const seenChatKeys = new Set();
+  async function pollLobbyChat(){
+    let val = null;
+    try{ val = await restGet('lobby-chat', 'orderBy=%22%24key%22&limitToLast=' + LOBBY_CHAT_KEEP); }
+    catch(e){ return; }
+    const keys = Object.keys(val || {}).sort();
+    const firstRun = seenChatKeys.size === 0;
+    keys.forEach(k => {
+      if(seenChatKeys.has(k)) return;
+      seenChatKeys.add(k);
+      lobbyChatKeys.push(k);
+      let m = val[k];
+      if(typeof m === 'string'){ try{ m = JSON.parse(m); }catch(e){ return; } }
+      if(!m || !m.nick) return;
+      appendLobbyChatLine(m.nick, m.text);
+    });
+    if(firstRun) void 0;   // the first poll fills the backlog, exactly as the listener did
+  }
+  function startRestChatPolling(){
+    stopRestChatPolling();
+    pollLobbyChat();
+    chatPollTimer = setInterval(() => { if(!inLiveGame()) pollLobbyChat(); }, POLL_CHAT_MS);
+  }
+  function stopRestChatPolling(){
+    if(chatPollTimer){ clearInterval(chatPollTimer); chatPollTimer = null; }
+  }
+
+  // ---- invites ----
+  let invitePollTimer = null;
+  function startRestInvitePolling(){
+    stopRestInvitePolling();
+    invitePollTimer = setInterval(() => { if(!inLiveGame()) pollMyInvite(); }, POLL_INVITE_MS);
+  }
+  function stopRestInvitePolling(){
+    if(invitePollTimer){ clearInterval(invitePollTimer); invitePollTimer = null; }
+  }
+
+  // ---- incoming friend calls ----
+  // A call needs the socket: its signalling is a rapid back-and-forth and a
+  // poll would make every step crawl. So the poll only NOTICES the call, then
+  // opens the socket and hands over to the real listener.
+  let callPollTimer = null;
+  async function pollDirectCall(){
+    if(!myNick || socketWanted) return;
+    let raw = null;
+    try{ raw = await restGet('direct-call/' + myNick); }
+    catch(e){ return; }
+    if(!raw) return;
+    vlog('ЗВОНОК: замечен запросом, открываю соединение');
+    netSocketOn('входящий звонок');
+    try{ startDirectCallListener(); }catch(e){}
+  }
+  function startRestCallPolling(){
+    stopRestCallPolling();
+    callPollTimer = setInterval(() => { if(!inLiveGame()) pollDirectCall(); }, POLL_CALL_MS);
+  }
+  function stopRestCallPolling(){
+    if(callPollTimer){ clearInterval(callPollTimer); callPollTimer = null; }
+  }
+
+  // ---- match assignment (only while actually searching) ----
+  let matchPollTimer = null;
+  function startRestMatchPolling(){
+    stopRestMatchPolling();
+    matchPollTimer = setInterval(() => { pollMatchAssigned(); }, POLL_MATCH_MS);
+  }
+  function stopRestMatchPolling(){
+    if(matchPollTimer){ clearInterval(matchPollTimer); matchPollTimer = null; }
+  }
+
+  try{
+    window.addEventListener('pagehide', restDropMyPresence);
+    window.addEventListener('beforeunload', restDropMyPresence);
+  }catch(e){}
+  // ================= END LOBBY WITHOUT A SOCKET =================
+
   async function storeGet(key, shared){
     if(!shared){
       // personal data: localStorage is the reliable source of truth (works everywhere,
@@ -7863,6 +8048,9 @@
         if(v !== null) return v;
       }catch(e){}
       return null;
+    }
+    if(REST_ENABLED && REST_BASE){
+      try{ return await restGet(fbPath(key)); }catch(e){ return null; }
     }
     if(!STORAGE_OK) return null;
     try{
@@ -7877,6 +8065,10 @@
       try{ localStorage.setItem('chess2-p-' + key, value); ok = true; }catch(e){}
       return ok;
     }
+    if(REST_ENABLED && REST_BASE){
+      try{ await restSet(fbPath(key), value); return true; }
+      catch(e){ lastStoreTransactionError = (e && e.message) || String(e); return false; }
+    }
     if(!STORAGE_OK) return false;
     try{ await fbDb.ref(fbPath(key)).set(value); return true; }catch(e){
       lastStoreTransactionError = (e && e.message) || String(e);
@@ -7884,6 +8076,12 @@
     }
   }
   async function storeList(prefix, shared){
+    if(REST_ENABLED && REST_BASE){
+      try{
+        const keys = await restListKeys(fbPath(prefix).replace(/\/$/, ''));
+        return keys.map(childKey => prefix + childKey);
+      }catch(e){ return []; }
+    }
     if(!STORAGE_OK) return [];
     try{
       const path = fbPath(prefix).replace(/\/$/, '');
@@ -7898,6 +8096,13 @@
   // child one by one, which turned one snapshot into 1+N round trips — and,
   // because every client does it, into O(N^2) traffic across the lobby.
   async function storeListEntries(prefix, shared){
+    if(REST_ENABLED && REST_BASE){
+      try{
+        const val = await restGet(fbPath(prefix).replace(/\/$/, ''));
+        if(!val) return [];
+        return Object.keys(val).map(childKey => ({ key: prefix + childKey, name: childKey, val: val[childKey] }));
+      }catch(e){ return []; }
+    }
     if(!STORAGE_OK) return [];
     try{
       const path = fbPath(prefix).replace(/\/$/, '');
@@ -7910,6 +8115,10 @@
   async function storeDelete(key, shared){
     if(!shared){
       try{ localStorage.removeItem('chess2-p-' + key); }catch(e){}
+      return;
+    }
+    if(REST_ENABLED && REST_BASE){
+      try{ await restDelete(fbPath(key)); }catch(e){}
       return;
     }
     if(!STORAGE_OK) return;
@@ -7931,6 +8140,18 @@
     }
   }
   async function storeTransaction(key, updateFn, shared){
+    if(REST_ENABLED && REST_BASE){
+      try{
+        const res = await restTransaction(fbPath(key), updateFn);
+        if(!res.committed && res.guarded === false){
+          lastStoreTransactionError = 'conditional write unavailable';
+        }
+        return !!res.committed;
+      }catch(e){
+        lastStoreTransactionError = (e && e.message) || String(e);
+        return false;
+      }
+    }
     if(!STORAGE_OK) return false;
     try{
       await fbDb.ref(fbPath(key)).transaction(current => updateFn(current === null || current === undefined ? null : current));
@@ -8004,6 +8225,8 @@
   let directCallRecoveryTimer = null;
   function startGlobalReconnectWatcher(){
     if(globalReconnectWatcherRef || !fbDb) return;
+    // Nothing to watch while we deliberately hold no connection.
+    if(LOBBY_OVER_REST && REST_BASE && !socketWanted) return;
     globalReconnectWatcherRef = fbDb.ref('.info/connected');
     let wasConnected = null;
     globalReconnectWatcherRef.on('value', (snap) => {
@@ -8575,6 +8798,7 @@
   let presenceListRef = null;
   let onlinePresence = {};        // nick -> {lang, flag}
   function writeMyPresence(){
+    if(LOBBY_OVER_REST && REST_BASE){ restWriteMyPresence(); return; }
     if(!STORAGE_OK || !myNick) return;
     const ref = fbDb.ref(fbPath('presence:' + myNick));
     try{ ref.onDisconnect().remove(); }catch(e){}
@@ -8582,10 +8806,18 @@
   }
   function startPresenceLoop(){
     if(presenceTimer){ clearInterval(presenceTimer); presenceTimer = null; }
+    if(LOBBY_OVER_REST && REST_BASE){
+      // Nothing here needs the socket any more, so it is shut before anything
+      // else gets a chance to open it.
+      netSocketOff('лобби');
+      startLobbyPolling();
+      return;
+    }
     writeMyPresence();
     startPresenceListener();
   }
   function startPresenceListener(){
+    if(LOBBY_OVER_REST && REST_BASE) return;   // handled by startLobbyPolling()
     if(!STORAGE_OK || presenceListRef) return;
     presenceListRef = fbDb.ref('presence');
     const parse = (raw) => {
@@ -8854,6 +9086,7 @@
     log.scrollTop = log.scrollHeight;
   }
   function startLobbyChatListener(){
+    if(LOBBY_OVER_REST && REST_BASE) return;   // handled by startRestChatPolling()
     if(!STORAGE_OK || lobbyChatRef) return;
     lobbyChatRef = fbDb.ref('lobby-chat').orderByKey().limitToLast(LOBBY_CHAT_KEEP);
     lobbyChatRef.on('child_added', (snap) => {
@@ -8993,6 +9226,7 @@
 
   let inviteFbRef = null;
   function startInviteListener(){
+    if(LOBBY_OVER_REST && REST_BASE) return;   // handled by startRestInvitePolling()
     if(!STORAGE_OK || !myNick || inviteFbRef) return;
     inviteFbRef = fbDb.ref(fbPath('invite:' + myNick));
     // pollMyInvite already holds every rule about which invites to accept and
@@ -9302,11 +9536,13 @@
 
   let matchAssignedFbRef = null;
   function startMatchAssignedListener(){
+    if(LOBBY_OVER_REST && REST_BASE){ startRestMatchPolling(); return; }
     if(!STORAGE_OK || !myNick || matchAssignedFbRef) return;
     matchAssignedFbRef = fbDb.ref(fbPath('match-assigned:' + myNick));
     matchAssignedFbRef.on('value', (snap) => { if(snap.val()) pollMatchAssigned(); });
   }
   function stopMatchAssignedListener(){
+    stopRestMatchPolling();
     if(matchAssignedFbRef){ matchAssignedFbRef.off(); matchAssignedFbRef = null; }
   }
 
@@ -9506,6 +9742,11 @@
     renderTimers();
     startTimerLoop();
     updateOnlineBar();
+    // A game needs the socket back: moves go straight between browsers, but
+    // agreeing that direct link, and everything else in the room, still runs
+    // through the database. The lobby stops asking for anything.
+    stopLobbyPolling();
+    netSocketOn('партия');
     startRoomPresence();
     startMoveChannels();
 
@@ -10956,6 +11197,14 @@
     resetAbsence();
     hideDisconnectNotice();
     if(notifyOther !== false) announceILeft();
+    // Back to the lobby: the socket is given up again and the slot goes back
+    // into the pool for whoever is arriving. Done after announceILeft() so the
+    // "player left" notice still goes out over the open connection.
+    setTimeout(() => {
+      if(inLiveGame()) return;
+      netSocketOff('вышли из партии');
+      startLobbyPolling();
+    }, 1200);
     stopRoomLeftListener();
     stopGroupVoiceInviteListener();
     roomPieceColors = {}; roomColorNames = {}; roomOutlineStyle = {};
@@ -11525,6 +11774,10 @@
   function startDirectCallListener(){
     stopDirectCallListener();
     if(!fbDb || !myNick){ vlog('ЗВОНОК: слушатель не запущен (нет ника)'); return; }
+    // In lobby mode the connection is closed, so a subscription here would
+    // never fire. pollDirectCall() notices the call and opens the connection
+    // first, then calls this again.
+    if(LOBBY_OVER_REST && REST_BASE && !socketWanted){ vlog('ЗВОНОК: жду опроса, соединение закрыто'); return; }
     vlog('ЗВОНОК: слушаю direct-call/' + myNick);
     directCallListenerRef = fbDb.ref(fbPath('direct-call:' + myNick));
     directCallListenerRef.on('value', (snap) => {
