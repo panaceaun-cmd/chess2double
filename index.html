@@ -12356,7 +12356,13 @@
     const statusEl = document.getElementById('voice-chat-status');
     if(!data){
       hideIncomingCallModal();
+      const wasActive = voiceActive;
       if(voiceActive) stopVoiceChatInternal('запись звонка исчезла');
+      // Nobody pressed anything: the record simply went. Treat it as a break
+      // and bring the call back, unless we are the ones who ended it.
+      if(wasActive && onlineRoomId && !gameOver && onlineMaxPlayers <= 2){
+        scheduleVoiceResume('запись звонка исчезла');
+      }
       updateVoiceChatButton();
       if(statusEl) statusEl.textContent = '';
       return;
@@ -12883,9 +12889,18 @@
     // server once it is over. During a restart only the pair subtree goes:
     // the room node also holds 'restart', which is what tells the other side
     // to come back, and removing it would cancel the recovery we are in.
+    // Erasing the whole node also erases call-state, which lives directly
+    // under the room and is the only thing telling the other side a call is
+    // on. Doing that after a dropped connection made one break end the call
+    // for both, for good. So the whole node goes only when somebody actually
+    // hung up; a break takes its own pair subtree and leaves the rest.
+    const deliberate = (voiceStopReason === 'user' || voiceStopReason === 'leave' ||
+                        voiceStopReason === 'вкладка закрывается' ||
+                        voiceStopReason === 'соперник положил трубку' ||
+                        voiceStopReason === 'уступает личному звонку');
     if(onlineRoomId && STORAGE_OK && fbDb){
       try{
-        if(voiceRestarting){
+        if(voiceRestarting || !deliberate){
           const other = onlineSide === 'p1' ? 'p2' : 'p1';
           dbRef('voice-signal/' + onlineRoomId + '/' + pairKeyFor(onlineSide, other)).remove();
         } else {
