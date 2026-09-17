@@ -11274,7 +11274,8 @@
     if(fbDb && onlineRoomId && (voiceActive || voiceCallState)){
       try{ dbRef(vCallStatePath()).set(JSON.stringify({state:'ended', caller:onlineSide})); }catch(e){}
     }
-    stopVoiceChatInternal();
+    stopVoiceChatInternal('leave');
+    cancelVoiceResume();
     if(groupVoiceActive) stopGroupVoice();
     // final safety net: wipe anything left in this room's voice/file
     // signaling regardless of which path above already handled it
@@ -11941,7 +11942,10 @@
     // the private call ends.
     if(voiceActive){
       voiceWasActiveBeforeDirectCall = true;
-      stopVoiceChatInternal();
+      // Stepping aside for a private call is deliberate, so nothing should
+      // drag the table's shared voice back up underneath it.
+      cancelVoiceResume();
+      stopVoiceChatInternal('уступает личному звонку');
       appendSystemToast(t('voicePausedForCallMsg'));
     }
     if(!directCallPeerConnection) establishDirectCallConnection();
@@ -12352,7 +12356,7 @@
     const statusEl = document.getElementById('voice-chat-status');
     if(!data){
       hideIncomingCallModal();
-      if(voiceActive) stopVoiceChatInternal();
+      if(voiceActive) stopVoiceChatInternal('запись звонка исчезла');
       updateVoiceChatButton();
       if(statusEl) statusEl.textContent = '';
       return;
@@ -12377,7 +12381,12 @@
       }
     } else if(data.state === 'ended'){
       hideIncomingCallModal();
-      if(voiceActive) stopVoiceChatInternal();
+      const droppedNotHungUp = (data.reason === 'drop');
+      if(voiceActive) stopVoiceChatInternal(droppedNotHungUp ? 'у соперника оборвалось' : 'соперник положил трубку');
+      // A player hanging up means the call is over. A connection dying does
+      // not — that is the case this whole block exists for.
+      if(droppedNotHungUp && data.caller !== onlineSide) scheduleVoiceResume('оборвалось у соперника');
+      else cancelVoiceResume();
       updateVoiceChatButton();
       if(statusEl) statusEl.textContent = '';
     }
@@ -12539,7 +12548,7 @@
         vlog('ПЕРЕЗАПУСК: по метке, чужое согласование не трогаю');
       }
       vlog('ПЕРЕЗАПУСК: выключаю связь');
-      stopVoiceChatInternal();
+      stopVoiceChatInternal('перезапуск');
       // Let the wipe land before the fresh signaling starts writing, or the
       // new offer can be deleted a moment after it is published.
       await new Promise(r => setTimeout(r, 600));
@@ -12652,6 +12661,8 @@
       const el = document.getElementById('voice-chat-status');
       if(st === 'connected'){
         if(el) el.textContent = t('voiceChatConnected');
+        // It is back: forget the plan to bring it back.
+        cancelVoiceResume();
         if(voiceReconnectTimer){ clearTimeout(voiceReconnectTimer); voiceReconnectTimer = null; }
         voiceDisconnectedSince = null;
         voiceLastConnectedAt = Date.now();
@@ -12660,8 +12671,11 @@
         if(Date.now() - voiceDisconnectedSince > RECONNECT_MAX_MS){
           if(el) el.textContent = t('voiceChatGaveUp');
           appendChatMessage(t('systemLabel'), t('voiceChatGaveUp'), true);
-          stopVoiceChatInternal();
-          setCallState({state:'ended', caller:onlineSide});
+          stopVoiceChatInternal('drop');
+          // The reason travels with the message, so the other side can tell
+          // this from somebody hanging up.
+          setCallState({state:'ended', caller:onlineSide, reason:'drop'});
+          scheduleVoiceResume('связь не восстановилась');
           return;
         }
         if(el) el.textContent = t('voiceChatReconnecting');
@@ -12805,8 +12819,49 @@
   }
   function showVoiceDiagError(msg){ vlog('ОШИБКА ' + msg); }
 
-  function stopVoiceChatInternal(){
-    vlog('связь выключается (перезапуск=' + voiceRestarting + ')');
+  // Attempts left to bring an unintentionally dropped call back, and the
+  // reason the last teardown happened. Without the reason there is no way to
+  // tell a player hanging up from a connection dying, and the two must not be
+  // treated the same.
+  let voiceResumeAttempt = 0;
+  let voiceResumeTimer = null;
+  const VOICE_RESUME_DELAYS_MS = [5000, 15000, 30000];
+
+  function cancelVoiceResume(){
+    if(voiceResumeTimer){ clearTimeout(voiceResumeTimer); voiceResumeTimer = null; }
+    voiceResumeAttempt = 0;
+  }
+  // Brings the call back after it died on its own. Deliberate hang-ups never
+  // come here, so a player who ends a call stays off.
+  function scheduleVoiceResume(why){
+    if(voiceResumeAttempt >= VOICE_RESUME_DELAYS_MS.length){
+      vlog('ВОЗВРАТ СВЯЗИ: попытки исчерпаны');
+      return;
+    }
+    const wait = VOICE_RESUME_DELAYS_MS[voiceResumeAttempt];
+    voiceResumeAttempt++;
+    vlog('ВОЗВРАТ СВЯЗИ: попытка ' + voiceResumeAttempt + ' через ' + Math.round(wait/1000) + ' с (' + (why || '') + ')');
+    if(voiceResumeTimer) clearTimeout(voiceResumeTimer);
+    voiceResumeTimer = setTimeout(async () => {
+      voiceResumeTimer = null;
+      // Everything that would make bringing it back wrong: the game is over,
+      // we left, the player turned it off themselves, or it is already back.
+      if(!onlineRoomId || gameOver || voiceActive || onlineMaxPlayers > 2) return;
+      if(voiceStopReason === 'user' || voiceStopReason === 'leave') return;
+      vlog('ВОЗВРАТ СВЯЗИ: поднимаю заново');
+      try{
+        setCallState({state:'accepted', caller: onlineSide});
+        await startVoiceChatInternal();
+      }catch(e){ showVoiceDiagError('возврат связи: ' + (e && e.message)); }
+      // Still nothing — try again, with a longer gap.
+      setTimeout(() => { if(!voiceActive) scheduleVoiceResume('повтор'); }, 4000);
+    }, wait);
+  }
+
+  let voiceStopReason = '';
+  function stopVoiceChatInternal(reason){
+    voiceStopReason = reason || 'не указана';
+    vlog('связь выключается (перезапуск=' + voiceRestarting + ', причина=' + voiceStopReason + ')');
     clearVoiceInvite();   // don't leave a stale ring in the room record
     voiceActive = false;
     updateVoiceChatButton();
@@ -12847,8 +12902,10 @@
       return;
     }
     if(voiceActive || voiceCallState === 'ringing' || voiceCallState === 'accepted'){
-      setCallState({state:'ended', caller:onlineSide});
-      stopVoiceChatInternal();
+      // The player pressed the button: that is final, nothing brings it back.
+      cancelVoiceResume();
+      setCallState({state:'ended', caller:onlineSide, reason:'user'});
+      stopVoiceChatInternal('user');
     } else {
       setCallState({state:'ringing', caller:onlineSide});
       // also ring through the room record: call-state alone was not reaching
@@ -17396,7 +17453,7 @@
   // writes a moment to go out.
   window.addEventListener('pagehide', () => {
     releaseWakeLock();
-    if(voiceActive) stopVoiceChatInternal();
+    if(voiceActive) stopVoiceChatInternal('вкладка закрывается');
     if(groupVoiceActive) stopGroupVoice();
     stopFileShareListener();
     if(activeDirectCall) endDirectCall();
