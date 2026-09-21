@@ -10178,7 +10178,7 @@
     try{
       // Drop the invite whichever way it came, and keep any other query.
       const rest = String(window.location.search || '')
-        .replace(/([?&])p=[^&]*&?/, '$1').replace(/[?&]$/, '');
+        .replace(/([?&])p=[^&]*&?/, '$1').replace(/([?&])l=[^&]*&?/, '$1').replace(/[?&]$/, '');
       NATIVE_HISTORY.replaceState(null, '', window.location.pathname + rest);
       return true;
     }catch(e){ return false; }
@@ -10193,8 +10193,14 @@
   }
   // The player's own address. Nothing about it expires: no room, no code, no
   // timestamp — just who to ask for a game.
+  // The invite rides in the query (?p=…), not after '#'. Whatever follows '#'
+  // never leaves the phone, so a messenger building a link preview on its
+  // own server could not see who sent it. The query does reach the server, and
+  // with the edge script in front of the site the preview card itself names
+  // the sender. The sender's language travels too, so the card speaks it.
   function buildInviteUrl(){
-    return window.location.origin + window.location.pathname + '#p=' + encodeURIComponent(myNick || '');
+    return window.location.origin + window.location.pathname +
+      '?p=' + encodeURIComponent(myNick || '') + '&l=' + encodeURIComponent(currentLang || 'ru');
   }
 
   // Hands the link to the system share sheet where there is one (Android, the
@@ -10209,7 +10215,10 @@
   async function shareOrCopyInvite(url){
     if(navigator.share){
       try{
-        await navigator.share({title: 'CHESS 2 DOUBLE', text: inviteShareText(), url});
+        // Some apps show only the title line above the card, so the name
+        // goes there as well as into the text.
+        const who = String(myNick || '').toUpperCase();
+        await navigator.share({title: (who ? who + ' — ' : '') + 'CHESS 2 DOUBLE', text: inviteShareText(), url});
         return 'shared';
       }catch(e){ /* sheet dismissed, or the browser refused it — fall through */ }
     }
