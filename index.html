@@ -10398,9 +10398,14 @@
 
   let roomPresenceInterval = null, opponentCheckInterval = null, opponentDisconnectDeclared = false;
   let opponentReconnectingSince = null;
-  function startRoomPresence(){
+  // keepMoveChannels: coming back onto the database from direct play must not
+  // tear down the direct links themselves — they are still good, they carry the
+  // moves, and they are how the other players are told what is happening.
+  // Tearing them down here left a game with no direct link for the rest of its
+  // life, and swallowed the very message that should have followed.
+  function startRoomPresence(keepMoveChannels){
     stopRoomPresence();
-    stopMoveChannels();
+    if(!keepMoveChannels) stopMoveChannels();
     opponentDisconnectDeclared = false;
     opponentReconnectingSince = null;
     // Reverted to the heartbeat. Dropping it moved the whole judgement of "is
@@ -13383,10 +13388,31 @@
     }
   }
 
-  document.getElementById('voice-chat-btn').addEventListener('click', () => {
+  // A call is agreed through the database. While the table runs directly
+  // between the browsers, neither player is connected to it: a ring written
+  // then sat in the caller's closed connection, and the other player was not
+  // listening anyway — "Calling…" for ever. So before ringing, the table is
+  // brought back: this side reconnects, tells the other side over the direct
+  // channel to do the same, and gives both a moment to arrive.
+  async function bringTableBackForVoice(){
+    autonomyHeldForVoice = true;
+    const wasDirect = roomStoreActive;
+    // Tell the others first, over the link that is certainly still open: we
+    // are not willing to run without the database now. On hearing it they
+    // reconnect as well, and our ring will reach them.
+    try{ announceAutonomyReadiness(); }catch(e){}
+    if(wasDirect) returnTethered('голосовой звонок');
+    if(wasDirect){
+      vlog('ЗВОНОК: возвращаю стол к базе перед вызовом');
+      await new Promise(r => setTimeout(r, 1500));
+    }
+  }
+
+  document.getElementById('voice-chat-btn').addEventListener('click', async () => {
     if(!onlineRoomId || !fbDb) return;
     if(onlineMaxPlayers > 2){
-      if(groupVoiceActive){ stopGroupVoice(); } else { startGroupVoice(); }
+      if(groupVoiceActive){ stopGroupVoice(); }
+      else { await bringTableBackForVoice(); startGroupVoice(); }
       return;
     }
     if(voiceActive || voiceCallState === 'ringing' || voiceCallState === 'accepted'){
@@ -13395,6 +13421,7 @@
       setCallState({state:'ended', caller:onlineSide, reason:'user'});
       stopVoiceChatInternal('user');
     } else {
+      await bringTableBackForVoice();
       setCallState({state:'ringing', caller:onlineSide});
       // also ring through the room record: call-state alone was not reaching
       // the other player, and the room provably does
@@ -13774,6 +13801,9 @@
     // The channel itself does not name the sender, so the seat is attached
     // where the message arrives, one channel per player.
     if(data.__seat) peerAutonomyReady[data.__seat] = !!data.ready;
+    // The other side stepped back onto the database — usually to ring us. Do
+    // the same at once, or their ring lands where we are not listening.
+    if(!data.ready && roomStoreActive) vlog('СТОЛ: соперник вернулся к базе, возвращаюсь тоже');
     if(!data.ready && roomStoreActive) returnTethered('соперник вернулся к базе');
     else if(data.ready) setTimeout(() => { try{ goAutonomous(); }catch(e){} }, 300);
     return true;
@@ -13829,7 +13859,7 @@
     autonomySince = 0;
     netSocketOn('вернулись к базе: ' + (why || ''));
     // Back on the database, so the ordinary presence machinery takes over again.
-    try{ if(inLiveGame()) startRoomPresence(); }catch(e){}
+    try{ if(inLiveGame()) startRoomPresence(true); }catch(e){}
     reattachRoomListeners();
     announceAutonomyReadiness();
     try{ if(typeof pushRoomState === 'function') pushRoomState(true); }catch(e){}
