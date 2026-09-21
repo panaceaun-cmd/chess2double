@@ -7939,8 +7939,13 @@
   // rather than three minutes. A waiting player may miss one refresh entirely
   // and still stay listed; a vanished one is gone within a minute and a bit.
   // Refreshing costs a write, which is not what the free plan runs out of.
-  const PRESENCE_REFRESH_MS = 30000;
-  const PRESENCE_TTL_MS     = 75000;
+  // A phone that dies or loses its connection cannot say goodbye; the only
+  // sign is that it stops checking in. So the gap between check-ins is the
+  // floor on how fast a vanished player can be spotted. Check-ins are writes,
+  // which the free plan barely counts — it is downloads it runs out of — so
+  // they can be frequent: every five seconds, and silent for twelve means gone.
+  const PRESENCE_REFRESH_MS = 5000;
+  const PRESENCE_TTL_MS     = 12000;
 
   let socketWanted = false;
   // Opening and closing the SDK's connection is what actually frees the slot.
@@ -7990,7 +7995,8 @@
   // ---- presence ----
   let presencePollTimer = null, presenceBeatTimer = null, presenceAgeTimer = null, presenceStateTimer = null;
   function presenceRecord(){
-    return JSON.stringify({lang: currentLang, flag: myFlagCode, ts: Date.now()});
+    // {".sv": "timestamp"} is filled in by the database with its own clock.
+    return {lang: currentLang, flag: myFlagCode, ts: {'.sv': 'timestamp'}};
   }
   async function restWriteMyPresence(){
     if(!myNick) return;
@@ -8002,6 +8008,8 @@
   // list headed "waiting to play".
   function amIWaitingForAGame(){
     if(!myNick || !REST_BASE) return false;
+    // In the background — on a phone, that is what leaving the app is.
+    try{ if(document.hidden) return false; }catch(e){}
     if(onlineRoomId) return false;                 // in a game, or sitting in a room
     try{
       // Playing the robot is playing: a seat with a bot on it means this
@@ -8066,13 +8074,31 @@
     try{ val = await restGet('presence'); }
     catch(e){ presenceReadInFlight = false; return; }
     finally { presenceReadInFlight = false; }   // a failed poll changes nothing; the next one tries again
-    const now = Date.now();
     const fresh = {};
     const stale = [];
+    // "Now" by the database's clock. Our own record, stamped by the server a
+    // moment ago, is the one to trust. Without it, the freshest record stands
+    // in — but never one dated implausibly far ahead: a single bad timestamp
+    // from the future would otherwise make every real player look dead and
+    // empty the lobby for everyone.
+    let now = 0;
+    const mine = myNick && val ? parsePresenceValue(val[myNick]) : null;
+    if(mine && typeof mine.ts === 'number'){
+      now = mine.ts;
+    } else {
+      const ceiling = Date.now() + 3600000;
+      Object.keys(val || {}).forEach(nick => {
+        const r = parsePresenceValue(val[nick]);
+        if(r && typeof r.ts === 'number' && r.ts <= ceiling && r.ts > now) now = r.ts;
+      });
+    }
+    if(!now) now = Date.now();
     Object.keys(val || {}).forEach(nick => {
       const rec = parsePresenceValue(val[nick]);
       // No timestamp, unreadable, or too old: nobody is behind this record.
-      if(!rec || !rec.ts || (now - rec.ts) > PRESENCE_TTL_MS){
+      // Too old, or dated in the future: either way nobody real is behind it.
+      if(!rec || typeof rec.ts !== 'number' || (now - rec.ts) > PRESENCE_TTL_MS ||
+         (rec.ts - now) > PRESENCE_TTL_MS){
         if(nick !== myNick) stale.push(nick);
         return;
       }
@@ -8147,13 +8173,25 @@
   // ---- lobby chat ----
   let chatPollTimer = null;
   const seenChatKeys = new Set();
+  // The newest key seen so far. Chat keys sort in the order lines were written,
+  // so "everything from this key on" is exactly "what I have not seen yet".
+  let lastLobbyChatKey = null;
   async function pollLobbyChat(){
+    // The first read fills the backlog. Every read after that asks only for
+    // what came after the newest line already shown — normally nothing at all.
+    // It used to fetch all fifty latest lines every seven seconds, which in a
+    // lively chat made someone merely looking at the lobby the most expensive
+    // kind of player there was.
+    const query = lastLobbyChatKey
+      ? 'orderBy=%22%24key%22&startAt=' + encodeURIComponent('"' + lastLobbyChatKey + '"') + '&limitToFirst=' + LOBBY_CHAT_KEEP
+      : 'orderBy=%22%24key%22&limitToLast=' + LOBBY_CHAT_KEEP;
     let val = null;
-    try{ val = await restGet('lobby-chat', 'orderBy=%22%24key%22&limitToLast=' + LOBBY_CHAT_KEEP); }
+    try{ val = await restGet('lobby-chat', query); }
     catch(e){ return; }
     const keys = Object.keys(val || {}).sort();
-    const firstRun = seenChatKeys.size === 0;
     keys.forEach(k => {
+      if(!lastLobbyChatKey || k > lastLobbyChatKey) lastLobbyChatKey = k;
+      // startAt includes the key it starts from; that line is already shown.
       if(seenChatKeys.has(k)) return;
       seenChatKeys.add(k);
       lobbyChatKeys.push(k);
@@ -8162,7 +8200,6 @@
       if(!m || !m.nick) return;
       appendLobbyChatLine(m.nick, m.text);
     });
-    if(firstRun) void 0;   // the first poll fills the backlog, exactly as the listener did
   }
   function startRestChatPolling(){
     stopRestChatPolling();
@@ -8292,6 +8329,20 @@
   try{
     window.addEventListener('pagehide', restDropMyPresence);
     window.addEventListener('beforeunload', restDropMyPresence);
+    document.addEventListener('visibilitychange', () => {
+      if(!myNick || !LOBBY_OVER_REST || !REST_BASE) return;
+      if(document.hidden){
+        if(presencePublished){
+          // A beacon, not a normal request: the page may be frozen right after.
+          restDropMyPresence();
+          presencePublished = false;
+          vlog('ЛОББИ: ушёл в фон — убран из списка');
+        }
+      } else {
+        // Back in front: listed again at once if actually waiting.
+        syncMyPresence(true);
+      }
+    });
   }catch(e){}
   // ================= END LOBBY WITHOUT A SOCKET =================
 
@@ -12863,7 +12914,7 @@
       // A player hanging up means the call is over. A connection dying does
       // not — that is the case this whole block exists for.
       if(droppedNotHungUp && data.caller !== onlineSide) scheduleVoiceResume('оборвалось у соперника');
-      else cancelVoiceResume();
+      else { cancelVoiceResume(); releaseVoiceHoldSoon('соперник положил трубку', 6000); }
       updateVoiceChatButton();
       if(statusEl) statusEl.textContent = '';
     }
@@ -13156,10 +13207,17 @@
         if(el) el.textContent = t('voiceChatConnected');
         // It is back: forget the plan to bring it back.
         cancelVoiceResume();
+        // The sound now flows directly between the two phones. The database
+        // was only needed to agree that; the slot can go back to the pool.
+        releaseVoiceHoldSoon('звонок соединился');
         if(voiceReconnectTimer){ clearTimeout(voiceReconnectTimer); voiceReconnectTimer = null; }
         voiceDisconnectedSince = null;
         voiceLastConnectedAt = Date.now();
       } else if(st === 'disconnected' || st === 'failed'){
+        // Repairing the call is a new round of agreement, which needs the
+        // database — on both sides, so the other player is told too.
+        cancelVoiceRelease();
+        if(roomStoreActive || !socketWanted){ try{ bringTableBackForVoice(); }catch(e){} }
         if(!voiceDisconnectedSince) voiceDisconnectedSince = Date.now();
         if(Date.now() - voiceDisconnectedSince > RECONNECT_MAX_MS){
           if(el) el.textContent = t('voiceChatGaveUp');
@@ -13403,7 +13461,30 @@
   // listening anyway — "Calling…" for ever. So before ringing, the table is
   // brought back: this side reconnects, tells the other side over the direct
   // channel to do the same, and gives both a moment to arrive.
+  // Lets the table go back to running without the database once a call no
+  // longer needs it. Waits a moment first so a connection that flickers up and
+  // straight back down does not bounce the table back and forth.
+  let voiceReleaseTimer = null;
+  function releaseVoiceHoldSoon(why, delayMs){
+    if(voiceReleaseTimer) clearTimeout(voiceReleaseTimer);
+    voiceReleaseTimer = setTimeout(() => {
+      voiceReleaseTimer = null;
+      // Only a two-player call can be let go this way. A group call links
+      // every player to every other and is left on the database for now.
+      if(onlineMaxPlayers > 2 && groupVoiceActive) return;
+      if(!autonomyHeldForVoice) return;
+      autonomyHeldForVoice = false;
+      vlog('ЗВОНОК: база больше не нужна (' + (why || '') + '), стол может работать напрямую');
+      try{ announceAutonomyReadiness(); }catch(e){}
+      setTimeout(() => { try{ goAutonomous(); }catch(e){} }, 1500);
+    }, delayMs || 4000);
+  }
+  function cancelVoiceRelease(){
+    if(voiceReleaseTimer){ clearTimeout(voiceReleaseTimer); voiceReleaseTimer = null; }
+  }
+
   async function bringTableBackForVoice(){
+    cancelVoiceRelease();
     autonomyHeldForVoice = true;
     const wasDirect = roomStoreActive;
     // Tell the others first, over the link that is certainly still open: we
@@ -13427,8 +13508,14 @@
     if(voiceActive || voiceCallState === 'ringing' || voiceCallState === 'accepted'){
       // The player pressed the button: that is final, nothing brings it back.
       cancelVoiceResume();
+      // "Ended" travels through the database, and while the table runs
+      // directly neither side is listening to it — so bring both back first,
+      // or the other phone would go on thinking the call is still up.
+      await bringTableBackForVoice();
       setCallState({state:'ended', caller:onlineSide, reason:'user'});
       stopVoiceChatInternal('user');
+      // Nothing about the call needs the database any more.
+      releaseVoiceHoldSoon('трубку положили', 6000);
     } else {
       await bringTableBackForVoice();
       setCallState({state:'ringing', caller:onlineSide});
