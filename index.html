@@ -10371,6 +10371,98 @@
     return JSON.parse(new TextDecoder().decode(bytes));
   }
 
+  // ---- keeping the links of a game alive ----
+  // Direct links used to be built at the start of a game and rebuilt only when
+  // the seats changed. A lost connection therefore cost the game its direct
+  // links for good: it carried on through the database, slower, and if the
+  // database was slow to come back too, the other players simply waited.
+  let linkRepairTimer = null, lastLinkRepairAt = 0;
+  function expectedPeerSeats(){
+    try{
+      if(!onlineRoomId || !onlinePlayers) return [];
+      return Object.keys(onlinePlayers).filter(s => s !== onlineSide && onlinePlayers[s]);
+    }catch(e){ return []; }
+  }
+  function linksLooksBroken(){
+    return expectedPeerSeats().some(s => {
+      const ch = (moveChannels || {})[s];
+      return !ch || ch.readyState !== 'open';
+    });
+  }
+  function startLinkRepair(){
+    if(linkRepairTimer) return;
+    linkRepairTimer = setInterval(() => {
+      if(!inLiveGame()) return;
+      if(serverlessGame) return;              // a link game repairs itself its own way
+      if(!expectedPeerSeats().length) return;
+      if(!linksLooksBroken()) return;
+      if(Date.now() - lastLinkRepairAt < 30000) return;
+      lastLinkRepairAt = Date.now();
+      vlog('СВЯЗЬ: прямой канал потерян — строю заново');
+      try{ netSocketOn('починка канала'); }catch(e){}
+      try{ startMoveChannels(); }catch(e){}
+    }, 15000);
+  }
+  function stopLinkRepair(){ if(linkRepairTimer){ clearInterval(linkRepairTimer); linkRepairTimer = null; } }
+  // Started once, for the life of the page.
+  startLinkRepair();
+
+  // ---- keeping a call alive ----
+  // Checked every eight seconds while a call is up.
+  let callHealthTimer = null;
+  function micIsLive(stream){
+    try{ return !!stream && stream.getTracks().some(t => t.readyState === 'live'); }catch(e){ return false; }
+  }
+  function pcSendsAudio(pc){
+    try{ return !!pc && pc.getSenders().some(s => s.track && s.track.readyState === 'live'); }catch(e){ return false; }
+  }
+  function startCallHealthWatch(){
+    if(callHealthTimer) return;
+    callHealthTimer = setInterval(callHealthTick, 8000);
+  }
+  function stopCallHealthWatch(){ if(callHealthTimer){ clearInterval(callHealthTimer); callHealthTimer = null; } }
+  async function callHealthTick(){
+    if(!groupVoiceActive && !voiceActive){ stopCallHealthWatch(); return; }
+    if(groupVoiceActive){
+      // A microphone that died during the interruption: you hear everyone,
+      // nobody hears you. Take it again and rebuild every link with it.
+      if(!micIsLive(groupVoiceLocalStream)){
+        vlog('ЗВОНОК: микрофон отвалился — беру заново');
+        try{
+          groupVoiceLocalStream = await navigator.mediaDevices.getUserMedia({audio: VOICE_AUDIO_CONSTRAINTS});
+          applyPttMuting();
+        }catch(e){ vlog('ЗВОНОК: микрофон не вернулся — ' + (e && e.message)); return; }
+        const seats = voicePeerSeats();
+        seats.forEach(seat => { try{ establishGroupVoicePeer(seat); }catch(e){} });
+        try{ broadcastVoiceInvite(seats, teamVoiceOnly && hasTeamPartners()); }catch(e){}
+        return;
+      }
+      voicePeerSeats().forEach(seat => {
+        const pc = groupVoicePeerConnections[seat];
+        const st = pc ? pc.connectionState : 'нет соединения';
+        const mute = pc && !pcSendsAudio(pc);
+        const broken = !pc || st === 'failed' || st === 'closed' || mute ||
+                       (st === 'disconnected' && Date.now() - (groupVoicePeerStarted[seat] || 0) > 15000);
+        if(!broken) return;
+        // Give the previous attempt time to finish before starting another.
+        if(Date.now() - (groupVoicePeerStarted[seat] || 0) < 12000) return;
+        vlog('ЗВОНОК: чиню связь с ' + seat + ' (' + st + (mute ? ', нет исходящего звука' : '') + ')');
+        try{ establishGroupVoicePeer(seat); }catch(e){}
+        // The other side has to rebuild its half too, or only one direction
+        // would come back — exactly the "I hear them, they do not hear me".
+        try{ broadcastVoiceInvite([seat], false); }catch(e){}
+      });
+      return;
+    }
+    // A two-player call: the same dead microphone, handled by the call's own
+    // restart, which takes a fresh one.
+    if(voiceActive && !micIsLive(voiceLocalStream)){
+      vlog('ЗВОНОК: микрофон отвалился — перезапускаю связь');
+      try{ stopVoiceChatInternal('drop'); }catch(e){}
+      try{ voiceResumeAttempt = 0; scheduleVoiceResume('микрофон отвалился'); }catch(e){}
+    }
+  }
+
   // ---- the quiet mailbox ----
   // Each player already has an inbox in the database (it carries invitations).
   // A server-less game uses one more slot in it, 'slg', to pass connection
@@ -14558,6 +14650,7 @@
       return;
     }
     voiceActive = true;
+    startCallHealthWatch();
     vlog('связь включена, микрофон получен');
     updateVoiceChatButton();
     updatePttHoldButtonVisibility();
@@ -15266,6 +15359,25 @@
       // normal play calls it.
       _socket: (on) => { if(on) netSocketOn('проверка'); else netSocketOff('проверка'); return socketWanted; },
       // Test hook: drops the server-less link the way a lost network does.
+      // Test hook: kills the microphone track, as a network interruption can.
+      _breakMic: () => {
+        try{ if(groupVoiceLocalStream) groupVoiceLocalStream.getTracks().forEach(t => t.stop()); }catch(e){}
+        try{ if(voiceLocalStream) voiceLocalStream.getTracks().forEach(t => t.stop()); }catch(e){}
+        return true;
+      },
+      _callState: () => {
+        const out = {};
+        try{
+          out.mic = micIsLive(groupVoiceLocalStream) || micIsLive(voiceLocalStream);
+          out.links = Object.keys(groupVoicePeerConnections || {}).map(s => {
+            const pc = groupVoicePeerConnections[s];
+            return s + ':' + (pc ? pc.connectionState : '-') + (pcSendsAudio(pc) ? '+звук' : '-звук');
+          });
+        }catch(e){ out.err = String(e).slice(0, 60); }
+        return out;
+      },
+      // Test hook: marks a direct channel as dead, the way a lost connection does.
+      _breakChannel: (seat) => { const c = moveChannels[seat]; if(c){ c.readyState = 'closed'; } return !!c; },
       _slgKill: () => { try{ if(SLG.pc) SLG.pc.close(); }catch(e){} try{ if(voicePeerConnection) voicePeerConnection.close(); }catch(e){} return true; },
       _slgState: () => ({ started: SLG.started, serverless: serverlessGame, trouble: !!slgTroubleSince, gameId: SLG.gameId,
         silent: (typeof slgGroupSilentSeats === 'function' && SLG.group) ? slgGroupSilentSeats() : [],
@@ -15654,6 +15766,7 @@
     }
     groupVoiceActive = true;
     if(serverlessGame) slgMarkVoice(true);
+    startCallHealthWatch();
     updateGroupVoiceButton();
     updatePttHoldButtonVisibility();
     hideIncomingCallModal();
