@@ -3939,15 +3939,22 @@
 
   let moveLog = [];
   let openingChatMsgEl = null;
+  // The first move, taking the last one back, or a new game can each change
+  // whether this player is waiting — tell the lobby right away.
+  function presenceMayHaveChanged(){
+    try{ setTimeout(() => { try{ syncMyPresence(); }catch(e){} }, 300); }catch(e){}
+  }
   function pushHistoryLog(text){
     moveLog.push(text);
     renderHistoryLog();
+    if(moveLog.length === 1) presenceMayHaveChanged();
   }
   // taking a move back also removes it from the move list — leaving it there
   // contradicted the board and the banner above it
   function popHistoryLog(){
     moveLog.pop();
     renderHistoryLog();
+    if(moveLog.length === 0) presenceMayHaveChanged();
   }
   function renderHistoryLog(){
     const log = document.getElementById('history-log');
@@ -3963,6 +3970,7 @@
   }
   function resetHistoryLog(){
     moveLog = [];
+    presenceMayHaveChanged();
     const log = document.getElementById('history-log');
     if(log) log.innerHTML = '<div class="no-players">' + escapeHtml(t('noMovesYet')) + '</div>';
   }
@@ -8079,9 +8087,13 @@
     try{ if(document.hidden) return false; }catch(e){}
     if(onlineRoomId) return false;                 // in a game, or sitting in a room
     try{
-      // Playing the robot is playing: a seat with a bot on it means this
-      // screen is busy with a game of its own.
-      for(let n = 1; n <= 4; n++) if((botLevel[n] || 0) > 0) return false;
+      // A robot on a seat means busy only once that game has really begun: a
+      // board with a robot set up but no move made yet is still somebody
+      // waiting for a person to play. After "New game" the board is empty
+      // again, and so is the player's calendar.
+      let hasBot = false;
+      for(let n = 1; n <= 4; n++) if((botLevel[n] || 0) > 0) hasBot = true;
+      if(hasBot && moveLog.length > 0 && !gameOver) return false;
     }catch(e){}
     return true;
   }
