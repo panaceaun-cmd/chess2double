@@ -3,52 +3,144 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CHESS 2 DOUBLE — Политика конфиденциальности</title>
+<title>CHESS 2 DOUBLE — Политика конфиденциальности / Privacy Policy</title>
 <style>
   body{font-family:system-ui,Arial,sans-serif;max-width:760px;margin:0 auto;
        padding:24px;line-height:1.6;color:#222;background:#fff}
   h1{font-size:24px} h2{font-size:18px;margin-top:28px}
   a{color:#0a58ca}
+  .lang{font-size:14px;margin-bottom:8px}
+  hr{margin:48px 0;border:0;border-top:1px solid #ddd}
+  .note{background:#f4f6f8;border-left:3px solid #0a58ca;padding:10px 14px}
 </style>
 </head>
 <body>
-<h1>Политика конфиденциальности — CHESS 2 DOUBLE</h1>
-<p>Дата вступления в силу: 4 сентября 2026 г.<br>
-Разработчик: Panacea Universal. Связь: <a href="mailto:panaceaun@gmail.com">panaceaun@gmail.com</a></p>
+<div class="lang"><a href="#ru">Русский</a> · <a href="#en">English</a></div>
 
-<h2>1. Какие данные мы собираем</h2>
-<p>Данные попадают в общее хранилище (Google Firebase) только тогда, когда вы играете онлайн или задаёте себе ник:</p>
+<!-- ============================ RU ============================ -->
+<h1 id="ru">Политика конфиденциальности — CHESS 2 DOUBLE</h1>
+<p>Дата вступления в силу: 22 сентября 2026 г.<br>
+Разработчик: Panacea Universal. Сайт: <a href="https://chess2double.com/">chess2double.com</a>.
+Связь с разработчиком: <a href="mailto:panaceaun@gmail.com">panaceaun@gmail.com</a></p>
+
+<h2>1. Какие данные мы не собираем</h2>
+<p>Игра не спрашивает и не хранит адрес электронной почты, номер телефона, имя, дату рождения и любые другие данные, по которым можно узнать вас в жизни. Входа через Google и другие аккаунты нет. Для игры нужны только ник и пароль.</p>
+
+<h2>2. Что хранится на сервере</h2>
+<p>Данные ниже попадают в общее хранилище (Google Firebase), только когда вы задаёте себе ник или играете онлайн:</p>
 <ul>
   <li>ваш ник;</li>
-  <li>пароль ника — только в виде необратимого хеша (PBKDF2 с солью). Сам пароль не сохраняется и не передаётся;</li>
+  <li>пароль — только в виде необратимого хеша (PBKDF2 с солью). Сам пароль не сохраняется и не передаётся;</li>
   <li>аватар, если вы его загрузите;</li>
   <li>статистика: сыгранные партии и победы;</li>
   <li>статус «в сети», выбранный язык интерфейса и выбранный флаг;</li>
-  <li>состояние партии во время онлайн-игры: позиция на доске, часы, настройки таймеров и ники участников;</li>
-  <li>сообщения в общем чате и в чате партии;</li>
-  <li>список друзей и приглашения в игру.</li>
+  <li>сообщения в общем чате;</li>
+  <li>список друзей и приглашения в игру;</li>
+  <li>при игре через лобби — состояние партии: позиция, часы, настройки и ники участников.</li>
 </ul>
 
-<h2>2. Локальные данные</h2>
-<p>Настройки игры (оформление, звук, язык) хранятся только на вашем устройстве и никуда не передаются.</p>
+<h2>3. Что остаётся только на вашем устройстве</h2>
+<ul>
+  <li>все настройки: язык, флаг, оформление доски и фигур, громкость, лимиты времени;</li>
+  <li>сохранённые партии;</li>
+  <li>для игры без сервера — ключи соединения и сохранённая позиция, чтобы партию можно было продолжить после обрыва связи;</li>
+  <li>запись о принятии условий.</li>
+</ul>
 
-<h2>3. Голосовая связь</h2>
-<p>Голос передаётся напрямую между устройствами игроков по технологии WebRTC. Мы не записываем и не храним голосовые данные.</p>
+<h2>4. Прямая связь между игроками</h2>
+<p>Ходы, чат партии и голосовая связь идут напрямую между устройствами игроков по технологии WebRTC; через наш сервер они не проходят и не записываются. Чтобы соединение установилось, используются публичные STUN-серверы Google, а технические данные соединения (сетевые адреса) кладутся в ящик игрока в Firebase и стираются, как только другой игрок их получит. По самой природе этой технологии соединённые игроки видят IP-адреса друг друга.</p>
 
-<h2>4. Микрофон</h2>
-<p>Доступ к микрофону запрашивается только для голосовой связи и только с вашего разрешения. Отказ не мешает играть.</p>
+<h2>5. Микрофон</h2>
+<p>Доступ к микрофону запрашивается только для голосовой связи и только с вашего разрешения. Голос не записывается и не хранится. Отказ не мешает играть.</p>
 
-<h2>5. Реклама и аналитика</h2>
-<p>Игра не показывает рекламу и не использует сторонние системы аналитики.</p>
+<h2>6. Кому передаются данные</h2>
+<ul>
+  <li>Google Firebase — хранение данных из раздела 2;</li>
+  <li>STUN-серверы Google — установление прямого соединения;</li>
+  <li>GitHub Pages — хостинг страницы игры;</li>
+  <li>Cloudflare — доставка сайта и защита от атак; обрабатывает сетевые запросы к сайту.</li>
+</ul>
+<p>Мы не продаём и не передаём ваши данные кому-либо ещё. Игра не показывает рекламу и не использует системы аналитики и слежения.</p>
 
-<h2>6. Дети</h2>
-<p>Игра не предназначена для детей младше 13 лет и не собирает данные целенаправленно у этой возрастной группы.</p>
+<h2>7. Публичность игровых данных</h2>
+<p>Ник, аватар, статистика, флаг и сообщения в общем чате видны другим игрокам. Не размещайте в нике, аватаре и чате то, что не хотите показывать посторонним.</p>
 
-<h2>7. Удаление данных</h2>
-<p>Чтобы удалить свой ник, статистику, аватар и другие данные, напишите на
-<a href="mailto:panaceaun@gmail.com">panaceaun@gmail.com</a>. Запрос обрабатывается в течение 30 дней.</p>
+<h2 id="delete">8. Хранение и удаление данных</h2>
+<p>Данные хранятся, пока вы пользуетесь игрой. Удалить их можно самостоятельно, без писем и запросов:</p>
+<div class="note">
+  Откройте игру на <a href="https://chess2double.com/">chess2double.com</a> или в приложении →
+  <b>Настройки</b> → <b>«🗑 Удалить мои данные»</b> → введите свой пароль → <b>Удалить</b>.
+</div>
+<p>Сразу удаляются статистика, аватар, список друзей, статус «в сети» и ящик приглашений, а на этом устройстве — профиль. Остаётся только запись «ник — хеш пароля»: она нужна, чтобы никто не смог занять ваш ник и выдать себя за вас. Ваш ник может также остаться в списках друзей других игроков. Данные на устройстве удаляются очисткой данных сайта в настройках браузера или удалением приложения.</p>
 
-<h2>8. Изменения</h2>
-<p>Изменения этой политики публикуются на этой странице с указанием новой даты вступления в силу.</p>
+<h2>9. Дети</h2>
+<p>Игра не предназначена для детей младше 13 лет, и мы сознательно не собираем их данные. Данные ребёнка удаляются той же кнопкой «Удалить мои данные».</p>
+
+<h2>10. Изменения</h2>
+<p>Изменения этой политики публикуются на этой странице с указанием новой даты вступления в силу. При существенных изменениях игра попросит согласие заново при следующем запуске.</p>
+
+<hr>
+
+<!-- ============================ EN ============================ -->
+<h1 id="en">Privacy Policy — CHESS 2 DOUBLE</h1>
+<p>Effective date: 22 September 2026.<br>
+Developer: Panacea Universal. Website: <a href="https://chess2double.com/">chess2double.com</a>.
+Contact: <a href="mailto:panaceaun@gmail.com">panaceaun@gmail.com</a></p>
+
+<h2>1. What we do not collect</h2>
+<p>The game does not ask for or store your email address, phone number, name, date of birth or any other data that identifies you in real life. There is no sign-in with Google or any other account. Only a nickname and a password are needed to play.</p>
+
+<h2>2. What is stored on the server</h2>
+<p>The data below reaches shared storage (Google Firebase) only when you choose a nickname or play online:</p>
+<ul>
+  <li>your nickname;</li>
+  <li>your password — only as an irreversible hash (PBKDF2 with salt). The password itself is never stored or sent;</li>
+  <li>your avatar, if you upload one;</li>
+  <li>statistics: games played and won;</li>
+  <li>“online” status, interface language and chosen flag;</li>
+  <li>messages in the lobby chat;</li>
+  <li>your friends list and game invitations;</li>
+  <li>for games through the lobby — the game state: position, clocks, settings and players’ nicknames.</li>
+</ul>
+
+<h2>3. What stays only on your device</h2>
+<ul>
+  <li>all settings: language, flag, board and piece appearance, volume, time limits;</li>
+  <li>saved games;</li>
+  <li>for server-less games — the connection keys and the saved position, so a game can be continued after a connection drop;</li>
+  <li>the record that you accepted the terms.</li>
+</ul>
+
+<h2>4. Direct connection between players</h2>
+<p>Moves, in-game chat and voice go directly between the players’ devices using WebRTC; they do not pass through our server and are not recorded. To set up the connection, Google’s public STUN servers are used, and technical connection details (network addresses) are placed in the player’s inbox in Firebase and erased as soon as the other player receives them. By the nature of this technology, connected players can see each other’s IP addresses.</p>
+
+<h2>5. Microphone</h2>
+<p>Microphone access is requested only for voice chat and only with your permission. Voice is not recorded or stored. Declining does not prevent you from playing.</p>
+
+<h2>6. Who receives data</h2>
+<ul>
+  <li>Google Firebase — storing the data listed in section 2;</li>
+  <li>Google STUN servers — setting up the direct connection;</li>
+  <li>GitHub Pages — hosting the game page;</li>
+  <li>Cloudflare — delivering the site and protecting it from attacks; it processes network requests to the site.</li>
+</ul>
+<p>We do not sell or pass your data to anyone else. The game shows no ads and uses no analytics or tracking systems.</p>
+
+<h2>7. Public game data</h2>
+<p>Your nickname, avatar, statistics, flag and lobby chat messages are visible to other players. Do not put into your nickname, avatar or chat anything you would not show to strangers.</p>
+
+<h2 id="delete-en">8. Retention and deletion</h2>
+<p>Data is kept while you use the game. You can delete it yourself, with no emails or requests:</p>
+<div class="note">
+  Open the game at <a href="https://chess2double.com/">chess2double.com</a> or in the app →
+  <b>Settings</b> → <b>“🗑 Delete my data”</b> → enter your password → <b>Delete</b>.
+</div>
+<p>Your statistics, avatar, friends list, “online” status and invitation inbox are deleted at once, together with the profile on this device. Only the “nickname — password hash” record remains: it prevents anyone from taking over your nickname and pretending to be you. Your nickname may also remain in other players’ friends lists. Data on the device is removed by clearing the site’s data in your browser settings or by uninstalling the app.</p>
+
+<h2>9. Children</h2>
+<p>The game is not intended for children under 13, and we do not knowingly collect their data. A child’s data is deleted with the same “Delete my data” button.</p>
+
+<h2>10. Changes</h2>
+<p>Changes to this policy are published on this page with a new effective date. For significant changes, the game will ask for your consent again the next time it starts.</p>
 </body>
 </html>
