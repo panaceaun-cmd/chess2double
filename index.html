@@ -2820,6 +2820,12 @@
   #board.board3d .piece.piece3d,
   #board.board3d .piece.piece-vec{ z-index:6; }
   #board-bright-block input[type="range"]{ width:100%; display:block; margin-top:8px; height:22px; }
+  /* The two panel titles sit centred in their gold bars. The online title is
+     a short phrase in a tall bar, so it can afford larger type than the local
+     one, which already wraps onto several lines. */
+  #local-players-panel > #local-players-title{ text-align:center; }
+  #online-panel > .online-header:has(#online-lobby-title){ justify-content:center; text-align:center; }
+  #online-panel > .online-header #online-lobby-title{ text-align:center; font-size:32px; line-height:1.15; }
 </style>
 </head>
 <body>
