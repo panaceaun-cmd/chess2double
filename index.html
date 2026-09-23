@@ -10560,6 +10560,26 @@
     }catch(e){}
     return blocked;
   }
+  // What the player sees instead of a single "connected": one mark per
+  // partner, so it is obvious who is heard and who is not.
+  function renderVoiceStatus(){
+    const el = document.getElementById('voice-chat-status');
+    if(!el || !groupVoiceActive) return;
+    const parts = voicePeerSeats().map(seat => {
+      const who = (onlinePlayers && onlinePlayers[seat]) || seat;
+      const pc = groupVoicePeerConnections[seat];
+      const st = pc ? pc.connectionState : 'нет';
+      const flow = voiceFlow[seat];
+      let mark;
+      if(st === 'connected' && flow && flow.in > 0) mark = '\u2705';        // sound arriving
+      else if(st === 'connected') mark = '\u26A0';                          // link up, no sound yet
+      else if(st === 'connecting' || st === 'new') mark = '\u23F3';         // still connecting
+      else mark = '\u274C';                                                 // no link
+      return who + ' ' + mark;
+    });
+    if(!parts.length) return;
+    el.textContent = parts.join(' \u00B7 ') + (micIsTransmitting() ? '' : ' \u2014 \U0001F507');
+  }
   async function checkVoiceFlow(){
     const seats = groupVoiceActive ? voicePeerSeats() : [];
     for(const seat of seats){
@@ -10589,6 +10609,7 @@
       try{ broadcastVoiceInvite([seat], false); }catch(e){}
     }
     if(groupVoiceActive || voiceActive) noticeIfMuted();
+    try{ renderVoiceStatus(); }catch(e){}
   }
 
   // ---- keeping a call alive ----
@@ -15597,8 +15618,24 @@
       // Test hook: stands in for a player at the table whose channel is open,
       // so the shared store can be exercised without two real devices. Does
       // nothing in normal play — nothing calls it.
-      _attachTestPeer: (seat, sendFn, roomId, mySeat) => {
-        if(roomId){ onlineRoomId = roomId; onlineWaitingOnly = false; onlineMaxPlayers = 2; }
+      // Test hook: joins a room the ordinary way, so listeners, presence and
+      // the voice machinery all run exactly as in a real lobby game.
+      _joinTestRoom: (roomId, seat, players, gameMode) => {
+        const room = {
+          mode: gameMode || '3p', maxPlayers: maxPlayersForMode(gameMode || '3p'), players, status: 'active',
+          board: initBoard(), turnIndex: 0, enPassant: null, lastMove: null, gameOver: false, moveSeq: 0, winnerTeam: null,
+          timers: {w: agreedTimerSec, b: agreedTimerSec, y: agreedTimerSec, g: agreedTimerSec},
+          moveLimitSec: moveLimitSec
+        };
+        joinOnlineRoom(roomId, seat, room);
+        // The room record itself is written by whoever creates the game; in a
+        // test the first seat does it, so the record exists for everyone else.
+        if(seat === 'p1') setTimeout(() => { try{ pushRoomState(true); }catch(e){} }, 800);
+        return true;
+      },
+      _attachTestPeer: (seat, sendFn, roomId, mySeat, maxPlayers, players) => {
+        if(roomId){ onlineRoomId = roomId; onlineWaitingOnly = false; onlineMaxPlayers = maxPlayers || 2; }
+        if(players){ Object.keys(players).forEach(k => { onlinePlayers[k] = players[k]; }); }
         onlineSide = mySeat || onlineSide || 'p1';
         onlinePlayers[onlineSide] = onlinePlayers[onlineSide] || 'me';
         onlinePlayers[seat] = onlinePlayers[seat] || ('peer-' + seat);
@@ -16325,6 +16362,7 @@
     pc.onconnectionstatechange = () => {
       const st = pc.connectionState;
       vlog('connectionState', onlineSide + '->' + otherSeat, st, 'sid=' + (groupVoiceSessionId[otherSeat] || '-'));
+      setTimeout(() => { try{ renderVoiceStatus(); }catch(e){} }, 50);
       const statusEl = document.getElementById('voice-chat-status');
       if(st === 'connected'){
         groupVoiceEverConnected[otherSeat] = true;   // worth retrying forever now
@@ -16381,6 +16419,12 @@
     }
     (async () => {
      try{
+      // A rebuild started a moment ago can already have closed this one: the
+      // link is being replaced, and going on would only throw.
+      if(pc.signalingState === 'closed' || groupVoicePeerConnections[otherSeat] !== pc){
+        vlog('согласование прервано: связь с ' + otherSeat + ' уже заменена');
+        return;
+      }
       if(amOfferer){
         await dbRef(groupVoicePairPath(otherSeat, 'offer')).remove();
         await dbRef(groupVoicePairPath(otherSeat, 'answer')).remove();
