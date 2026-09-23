@@ -2399,6 +2399,9 @@
     border:1px solid var(--brass-dim); color:var(--ink); background:rgba(0,0,0,.25);
   }
   .omp-chip.active{ background:var(--brass); color:#1a1206; border-color:var(--brass); font-weight:bold; }
+  /* Which mode the waiting player is inviting into. */
+  .pmode{ margin-left:6px; font-size:12px; padding:1px 6px; border-radius:6px;
+          border:1px solid var(--brass-dim); color:var(--brass); white-space:nowrap; }
   /* The two main ways into a game share one shape: full width, the normal
      button height. The long server-less caption may wrap on a narrow phone
      rather than be cut off. */
@@ -4432,6 +4435,7 @@
       chip.title = modeMetaTitle(m);
       chip.addEventListener('click', () => {
         if(m === mode) return;
+        setTimeout(() => { try{ syncMyPresence(true); }catch(e){} }, 400);
         // Go through the matching card, so all its rules apply.
         const cards = document.querySelectorAll('#mode-menu .menu-card');
         const card = cards[['2p', '3p', '4p', 'ffa', 'training'].indexOf(m)];
@@ -4492,6 +4496,7 @@
         currentPuzzle = null;
         document.getElementById('puzzle-selector-panel').classList.remove('show');
         if(mode===m) return;
+        setTimeout(() => { try{ syncMyPresence(true); }catch(e){} }, 400);
         // In an online game the same cards change the mode of the game in
         // progress instead of throwing the board away and starting a new one.
         // Widening frees seats, and the invite buttons then route into this
@@ -8184,7 +8189,7 @@
   let presencePollTimer = null, presenceBeatTimer = null, presenceAgeTimer = null, presenceStateTimer = null;
   function presenceRecord(){
     // {".sv": "timestamp"} is filled in by the database with its own clock.
-    return {lang: currentLang, flag: myFlagCode, ts: {'.sv': 'timestamp'}};
+    return {lang: currentLang, flag: myFlagCode, mode: mode, ts: {'.sv': 'timestamp'}};
   }
   async function restWriteMyPresence(){
     if(!myNick) return;
@@ -9512,7 +9517,7 @@
     const total = Object.keys(onlinePresence).length + (onlinePresence[myNick] ? 0 : 1);
     const nicks = Object.keys(onlinePresence)
       .filter(n => n !== myNick)
-      .map(n => ({ nick: n, lang: onlinePresence[n].lang, flag: onlinePresence[n].flag }));
+      .map(n => ({ nick: n, lang: onlinePresence[n].lang, flag: onlinePresence[n].flag, mode: onlinePresence[n].mode }));
     lastOnlineNicks = nicks;
     const wrap = document.getElementById('online-players-list');
     // The count covers everyone; the rows below cover only friends until the
@@ -9531,7 +9536,7 @@
       return;
     }
     wrap.innerHTML = '';
-    for(const {nick, lang, flag:countryCode} of shown){
+    for(const {nick, lang, flag:countryCode, mode:theirMode} of shown){
       const stats = await getStats(nick);
       const avatarRaw = await getAvatarCached(nick);
       // A newer render started while we were awaiting — stop, or our rows land
@@ -9547,8 +9552,12 @@
       const flag = countryInfo ? countryInfo.flag : langFlag(lang);
       const flagTitle = countryInfo ? countryInfo.name : lang;
       const flagSpan = flag ? '<span class="pname-flag" title="' + escapeHtml(flagTitle) + '">' + flag + '</span>' : '';
+      // What this player is waiting for. Records written by an older version
+      // carry no mode; those rows simply show no badge.
+      const modeBadge = (theirMode && OMP_CHIP_LABEL[theirMode])
+        ? '<span class="pmode" title="' + escapeHtml(modeMetaTitle(theirMode)) + '">' + OMP_CHIP_LABEL[theirMode] + '</span>' : '';
       row.innerHTML = '<span style="display:flex;align-items:center;">' + avImg +
-        '<span><span class="pname">' + flagSpan + escapeHtml(nick) + '</span><span class="prating">' +
+        '<span><span class="pname">' + flagSpan + escapeHtml(nick) + modeBadge + '</span><span class="prating">' +
         t('gamesLabel') + ': ' + stats.games + ' · ' + t('winsLabel') + ': ' + stats.wins + '</span></span></span>';
       const btn = document.createElement('button');
       btn.className = 'btn small';
