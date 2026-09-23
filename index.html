@@ -10427,6 +10427,57 @@
     return JSON.parse(new TextDecoder().decode(bytes));
   }
 
+  // ---- putting a table back together ----
+  // Everything a game from the lobby needs, rebuilt in one go. Safe to call
+  // at any time: each step is the same one the game does when it starts.
+  let lastTableRepairAt = 0;
+  function repairTableLink(why, force){
+    if(!inLiveGame() || serverlessGame) return;
+    if(!force && Date.now() - lastTableRepairAt < 20000) return;
+    lastTableRepairAt = Date.now();
+    vlog('СВЯЗЬ: восстанавливаю стол — ' + (why || ''));
+    try{ netSocketOn('починка стола'); }catch(e){}
+    // A table running on its own has nothing to fall back on while its links
+    // are broken, so it goes back to the database first.
+    try{ if(roomStoreActive) returnTethered('починка стола'); }catch(e){}
+    try{ reattachRoomListeners(); }catch(e){}
+    try{ startRoomPresence(true); }catch(e){}          // heartbeat and listener again
+    try{ startMoveChannels(); }catch(e){}              // direct links again
+    try{ if(typeof pushRoomState === 'function') pushRoomState(true); }catch(e){}
+    // And the call, if one was going: its own watchdog would get there in the
+    // end, but there is no reason to make players wait for it.
+    setTimeout(() => {
+      try{
+        if(groupVoiceActive){
+          voicePeerSeats().forEach(seat => { try{ establishGroupVoicePeer(seat); }catch(e){} });
+          try{ broadcastVoiceInvite(voicePeerSeats(), teamVoiceOnly && hasTeamPartners()); }catch(e){}
+        } else if(voiceActive){
+          voiceResumeAttempt = 0;
+          try{ scheduleVoiceResume('починка стола'); }catch(e){}
+        }
+      }catch(e){}
+    }, 2500);
+  }
+  // The whole table gone quiet means the fault is on this side: one player
+  // leaving does not silence the others.
+  function tableIsSilent(){
+    try{
+      if(!inLiveGame() || serverlessGame || roomStoreActive) return false;
+      const others = Object.keys(onlinePlayers || {}).filter(s => s !== onlineSide && onlinePlayers[s]);
+      if(!others.length) return false;
+      return others.every(s => presenceStaleFor(onlinePlayers[s], cachedRoomPresence(onlinePlayers[s])) > 45000);
+    }catch(e){ return false; }
+  }
+  setInterval(() => { if(tableIsSilent()) repairTableLink('за столом тихо у всех'); }, 10000);
+  // The clearest signal of all: the device says the network is back.
+  try{
+    window.addEventListener('online', () => {
+      vlog('СЕТЬ: интернет вернулся');
+      if(serverlessGame){ try{ slgTroubleTick(); }catch(e){} return; }
+      repairTableLink('интернет вернулся', true);
+    });
+  }catch(e){}
+
   // ---- keeping the links of a game alive ----
   // Direct links used to be built at the start of a game and rebuilt only when
   // the seats changed. A lost connection therefore cost the game its direct
@@ -10457,6 +10508,8 @@
       vlog('СВЯЗЬ: прямой канал потерян — строю заново');
       try{ netSocketOn('починка канала'); }catch(e){}
       try{ startMoveChannels(); }catch(e){}
+      // If the table has also gone quiet, the links are a symptom: repair it all.
+      if(tableIsSilent()) repairTableLink('канал потерян и стол молчит');
     }, 15000);
   }
   function stopLinkRepair(){ if(linkRepairTimer){ clearInterval(linkRepairTimer); linkRepairTimer = null; } }
@@ -15433,6 +15486,12 @@
         return out;
       },
       // Test hook: marks a direct channel as dead, the way a lost connection does.
+      _tableState: () => {
+        const others = Object.keys(onlinePlayers || {}).filter(s => s !== onlineSide && onlinePlayers[s]);
+        return { live: inLiveGame(), silent: tableIsSilent(), tethered: !roomStoreActive, socket: socketWanted,
+                 others: others.map(s => s + ':' + onlinePlayers[s] + ':' + Math.round(presenceStaleFor(onlinePlayers[s], cachedRoomPresence(onlinePlayers[s])) / 1000) + 'с') };
+      },
+      _repairTable: (why) => { repairTableLink(why || 'проверка', true); return true; },
       _breakChannel: (seat) => { const c = moveChannels[seat]; if(c){ c.readyState = 'closed'; } return !!c; },
       _slgKill: () => { try{ if(SLG.pc) SLG.pc.close(); }catch(e){} try{ if(voicePeerConnection) voicePeerConnection.close(); }catch(e){} return true; },
       _slgState: () => ({ started: SLG.started, serverless: serverlessGame, trouble: !!slgTroubleSince, gameId: SLG.gameId,
