@@ -2394,13 +2394,16 @@
   #online-mode-pick .omp-line b{ color:var(--brass); }
   #online-mode-pick-chips{ display:flex; gap:6px; flex-wrap:wrap; }
   .omp-chip{
-    flex:1 1 auto; min-width:54px; text-align:center; cursor:pointer; user-select:none;
-    padding:7px 10px; border-radius:8px; font-size:15px; line-height:1.1;
+    flex:1 1 auto; min-width:44px; text-align:center; cursor:pointer; user-select:none;
+    /* The figures are pulled tight against each other, otherwise four of them
+       make a button twice as wide as it needs to be. The padding on the right
+       makes up for the gap letter-spacing leaves after the last one. */
+    padding:7px 4px 7px 2px; border-radius:8px; font-size:14px; line-height:1.1; letter-spacing:-4px;
     border:1px solid var(--brass-dim); color:var(--ink); background:rgba(0,0,0,.25);
   }
   .omp-chip.active{ background:var(--brass); color:#1a1206; border-color:var(--brass); font-weight:bold; }
   /* Which mode the waiting player is inviting into. */
-  .pmode{ margin-left:6px; font-size:12px; padding:1px 6px; border-radius:6px;
+  .pmode{ margin-left:6px; font-size:12px; padding:1px 5px 1px 3px; border-radius:6px; letter-spacing:-4px;
           border:1px solid var(--brass-dim); color:var(--brass); white-space:nowrap; }
   /* The two main ways into a game share one shape: full width, the normal
      button height. The long server-less caption may wrap on a narrow phone
@@ -4436,7 +4439,9 @@
   // card itself, so a game already running is widened or narrowed exactly as
   // it would be from the cards — one behaviour, not two that drift apart.
   const OMP_MODES = ['2p', '3p', '4p', 'ffa'];
-  const OMP_CHIP_LABEL = {'2p': '👥 2', '3p': '👥 3', '4p': '👥 4', 'ffa': '⚔ 4'};
+  // As many little figures as there are players — the two-person symbol used
+  // to stand for three and four as well, which simply looked wrong.
+  const OMP_CHIP_LABEL = {'2p': '👤👤', '3p': '👤👤👤', '4p': '👤👤👤👤', 'ffa': '👤👤👤👤⚔'};
   function renderOnlineModePick(){
     const wrap = document.getElementById('online-mode-pick-chips');
     if(!wrap) return;
