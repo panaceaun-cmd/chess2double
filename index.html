@@ -12092,7 +12092,7 @@
     // No server stands behind this game, so there is nothing to fall back to:
     // offer to keep the position, then leave cleanly.
     try{
-      if(!gameOver) offerSaveBeforeLeaving(() => leaveOnlineGame(false), true);
+      if(!gameOver) offerSaveBeforeLeaving(() => leaveOnlineGame(false), true, AUTO_LEAVE_AFTER_MS);
       else leaveOnlineGame(false);
     }catch(e){}
   }
@@ -12583,8 +12583,9 @@
     try{ showWinnerOnline(onlineSide, 'left'); }catch(e){}
     try{ updateWaitingForPlayerBanner(); }catch(e){}
     // The position is worth keeping even though the game is over — the same
-    // prompt the Leave button uses.
-    try{ offerSaveBeforeLeaving(() => leaveOnlineGame(false), true); }
+    // prompt the Leave button uses, except that this one leaves by itself if
+    // nobody answers it.
+    try{ offerSaveBeforeLeaving(() => leaveOnlineGame(false), true, AUTO_LEAVE_AFTER_MS); }
     catch(e){ try{ leaveOnlineGame(false); }catch(e2){} }
   }
   function showDisconnectNotice(nick){
@@ -12740,8 +12741,9 @@
         // Was: leaveOnlineGame(false) straight away, which threw the position
         // out without asking. The five minutes are up and the game is over
         // either way, so offer to keep it first — the same prompt the Leave
-        // button uses — and only then clear the room and start fresh.
-        offerSaveBeforeLeaving(() => leaveOnlineGame(false), true);
+        // button uses — and only then clear the room and start fresh. The
+        // prompt answers itself, or the game would simply hang here instead.
+        offerSaveBeforeLeaving(() => leaveOnlineGame(false), true, AUTO_LEAVE_AFTER_MS);
       }
       return;
     }
@@ -12841,8 +12843,9 @@
       try{ updateWaitingForPlayerBanner(); }catch(e){}
       appendSystemToast(t('roomClosedMsg'));
       // Offer to keep the position before clearing the room, same as when a
-      // single opponent runs out of time to come back.
-      offerSaveBeforeLeaving(() => leaveOnlineGame(false), true);
+      // single opponent runs out of time to come back — and, like it, leave on
+      // our own if the prompt goes unanswered.
+      offerSaveBeforeLeaving(() => leaveOnlineGame(false), true, AUTO_LEAVE_AFTER_MS);
     }
   }
 
@@ -19697,8 +19700,16 @@
       appendChatMessage(t('systemLabel'), ok ? t('savedGamesSaved') : t('savedGamesSaveFailed'), true);
     });
 
+    const solModal = document.getElementById('save-on-leave-modal');
+    // Somebody is at the screen after all: stop the count and let them take
+    // their time.
+    if(solModal){
+      ['pointerdown','keydown','input'].forEach(ev =>
+        solModal.addEventListener(ev, () => { try{ cancelAutoLeave(); }catch(e){} }, true));
+    }
     const yes = document.getElementById('save-on-leave-yes');
     if(yes) yes.addEventListener('click', () => {
+      try{ cancelAutoLeave(); }catch(e){}
       const c = document.getElementById('save-on-leave-comment');
       saveCurrentGame(c ? c.value : '');
       if(c) c.value = '';
@@ -19707,6 +19718,7 @@
     });
     const no = document.getElementById('save-on-leave-no');
     if(no) no.addEventListener('click', () => {
+      try{ cancelAutoLeave(); }catch(e){}
       document.getElementById('save-on-leave-modal').classList.remove('show');
       if(pendingLeaveAction){ const f = pendingLeaveAction; pendingLeaveAction = null; f(); }
     });
@@ -19715,16 +19727,58 @@
   // Ask about saving before an unfinished game is abandoned; `proceed` is
   // whatever the player was actually trying to do.
   let pendingLeaveAction = null;
+  // A game that ended by itself — an opponent who never came back — used to
+  // stop at this prompt and wait for an answer that often never came: the
+  // player is usually not at the screen at all, which is why an unfinished
+  // game sat there for hours after the other player's five minutes ran out.
+  // Left untouched, the prompt now saves the position and leaves on its own.
+  // Any touch inside it cancels that, so a player who IS there is never
+  // hurried while typing a comment.
+  const AUTO_LEAVE_AFTER_MS = 30000;
+  let autoLeaveTimer = null;
+  let autoLeaveTitleBase = null;
+  function cancelAutoLeave(){
+    if(autoLeaveTimer){ clearInterval(autoLeaveTimer); autoLeaveTimer = null; }
+    const title = document.getElementById('save-on-leave-title');
+    if(title && autoLeaveTitleBase !== null){ title.textContent = autoLeaveTitleBase; }
+    autoLeaveTitleBase = null;
+  }
+  function startAutoLeave(afterMs){
+    cancelAutoLeave();
+    const title = document.getElementById('save-on-leave-title');
+    autoLeaveTitleBase = title ? title.textContent : '';
+    const until = Date.now() + afterMs;
+    // The count is a bare number on purpose: it reads the same in every one of
+    // the fifty languages and needs no wording of its own.
+    const tick = () => {
+      const left = Math.max(0, Math.round((until - Date.now()) / 1000));
+      if(title) title.textContent = autoLeaveTitleBase + ' (' + left + ')';
+      if(left > 0) return;
+      cancelAutoLeave();
+      const c = document.getElementById('save-on-leave-comment');
+      try{ saveCurrentGame(c ? c.value : ''); }catch(e){}
+      if(c) c.value = '';
+      const modal = document.getElementById('save-on-leave-modal');
+      if(modal) modal.classList.remove('show');
+      if(pendingLeaveAction){ const f = pendingLeaveAction; pendingLeaveAction = null; f(); }
+    };
+    tick();
+    autoLeaveTimer = setInterval(tick, 1000);
+  }
   // evenIfOver: for a game that has just been ended by something other than
   // the players — an opponent who never came back. The position is worth
   // keeping precisely then, and by that point gameOver is already set.
-  function offerSaveBeforeLeaving(proceed, evenIfOver){
+  // autoAfterMs: nobody asked for this ending, so the prompt answers itself
+  // after that long. Left out for anything the player started themselves.
+  function offerSaveBeforeLeaving(proceed, evenIfOver, autoAfterMs){
+    cancelAutoLeave();
     const worth = evenIfOver ? hasMovesToSave() : gameWorthSaving();
     if(!worth){ proceed(); return; }
     pendingLeaveAction = proceed;
     const c = document.getElementById('save-on-leave-comment');
     if(c) c.value = '';
     document.getElementById('save-on-leave-modal').classList.add('show');
+    if(autoAfterMs > 0) startAutoLeave(autoAfterMs);
   }
 
 
