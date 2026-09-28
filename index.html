@@ -5156,26 +5156,99 @@
   // whenever a room-state update arrives) — visually, and into the same
   // local holders a subsequent LOCAL change would build on top of, so nobody
   // ever pushes a style update that accidentally forgets someone else's.
+  // Does the look that just arrived say something different from the one on
+  // this screen? Only then is it worth insisting.
+  function roomStyleDiffersFromMine(room){
+    try{
+      const same = (a, b) => JSON.stringify(a || {}) === JSON.stringify(b || {});
+      if(room.pieceColors && !same(room.pieceColors, roomPieceColors)) return true;
+      if(room.colorNames && !same(room.colorNames, roomColorNames)) return true;
+      if(room.outlineStyle && !same(room.outlineStyle, roomOutlineStyle)) return true;
+    }catch(e){}
+    return false;
+  }
   function applyRoomStyleFields(room){
+    // A look older than the one on screen is ignored, and ours is said again
+    // so the room record stops carrying it. Payloads from a player running an
+    // older version have no number at all; for those the time window below is
+    // still what protects a fresh change.
+    // Ignoring an out-of-date look is only half the job: the room record now
+    // holds it, so everyone reading the room next — the sender included —
+    // would settle on the old colour while this screen showed the new one.
+    // Saying ours again puts the record right. Bounded, so two players
+    // changing colours at the same moment come to rest instead of arguing.
+    const sayMineAgain = () => {
+      if(styleReassertLeft <= 0 || !roomStyleDiffersFromMine(room)) return;
+      styleReassertLeft--;
+      clearTimeout(styleChangeDebounceTimer);
+      styleChangeDebounceTimer = setTimeout(() => {
+        lastSentSettings = null;
+        forceRoomWrite = true;
+        pushRoomState(null, {lookOnly: true}).then(ok => showColorSyncResult(ok));
+      }, 300);
+    };
+    const incomingSeq = room.styleSeq || 0;
+    if(incomingSeq > 0 || styleSeq > 0){
+      // Both sides count the look. The number decides, and nothing else has
+      // to: a push about a move repeats the look its sender knew, and that
+      // one is simply older.
+      if(incomingSeq < styleSeq){ sayMineAgain(); return; }
+      styleSeq = incomingSeq;
+    } else if(Date.now() - lastStyleChangeAt < STYLE_ECHO_GRACE_MS){
+      // The sender is running a version that does not count the look yet, so
+      // the only thing to go on is the clock: a payload that left them before
+      // our own change cannot know about it.
+      sayMineAgain();
+      return;
+    }
     applyingRemoteRoomStyle = true;
+    try{
+    // Only what actually differs is applied. Re-applying an unchanged colour
+    // name runs a full interface refresh, and re-applying an unchanged colour
+    // throws away the rendered pieces — which, arriving between picking a piece
+    // up and putting it down, quietly cancelled the move.
+    const cssNow = (name) => {
+      try{ return getComputedStyle(document.documentElement).getPropertyValue(name).trim().toLowerCase(); }
+      catch(e){ return ''; }
+    };
     if(room.pieceColors){
+      const before = roomPieceColors;
       roomPieceColors = room.pieceColors;
-      ['w','b','y','g'].forEach(k => { if(roomPieceColors[k]) applyPieceColor(k, roomPieceColors[k], false); });
+      ['w','b','y','g'].forEach(k => {
+        const hex = roomPieceColors[k];
+        if(!hex) return;
+        if((before && before[k]) === hex && cssNow('--accent-' + CSSCOLOR[k]) === String(hex).toLowerCase()) return;
+        applyPieceColor(k, hex, false);
+      });
     }
     if(room.colorNames){
+      const before = roomColorNames;
       roomColorNames = room.colorNames;
-      ['w','b','y','g'].forEach(k => { if(k in roomColorNames) applyColorName(k, roomColorNames[k], false); });
+      ['w','b','y','g'].forEach(k => {
+        if(!(k in roomColorNames)) return;
+        const want = roomColorNames[k] || null;
+        if((before && before[k] ? before[k] : null) === want && (customColorNames[k] || null) === want) return;
+        applyColorName(k, want, false);
+      });
     }
     if(room.outlineStyle){
+      const before = roomOutlineStyle;
       roomOutlineStyle = room.outlineStyle;
       ['w','b','y','g'].forEach(k => {
         const s = roomOutlineStyle[k];
         if(!s) return;
-        if(s.w !== undefined) applyOutlineWidth(k, parseFloat(s.w), false);
-        if(s.c) applyOutlineColor(k, s.c, false);
+        const was = (before && before[k]) || {};
+        if(s.w !== undefined && parseFloat(was.w) !== parseFloat(s.w)) applyOutlineWidth(k, parseFloat(s.w), false);
+        if(s.c && was.c !== s.c) applyOutlineColor(k, s.c, false);
       });
     }
-    applyingRemoteRoomStyle = false;
+    }finally{
+      // Whatever went wrong above, this flag has to come back down: while it
+      // is up every local change of the look is treated as an echo and never
+      // sent, so one stumble here used to freeze the colours for the rest of
+      // the game.
+      applyingRemoteRoomStyle = false;
+    }
   }
   // Called right when joining a room: a player's own saved color/name/
   // outline customizations already exist in localStorage from any earlier
@@ -5200,15 +5273,46 @@
       if(savedOutlineColor) applyOutlineColor(colorKey, savedOutlineColor, false);
     });
   }
+  // A change of the look must reach the room record itself, not only the
+  // direct channels. A push normally skips the database whenever every player
+  // was reached directly — fine for a move, which the next push repeats
+  // anyway, but a colour is pushed once: if that single delivery is lost on a
+  // channel that is being rebuilt, nothing ever says it again, and a player
+  // rejoining later reads the old look out of the record.
+  let forceRoomWrite = false;
   let styleChangeDebounceTimer = null;
+  // When this player last changed the look themselves. Only genuine local
+  // changes count — applying somebody else's look does not.
+  let lastStyleChangeAt = 0;
+  // How many times a change of our own may be re-sent over an older look
+  // coming back at us. Bounded on purpose: it has to end.
+  let styleReassertLeft = 0;
+  const STYLE_ECHO_GRACE_MS = 6000;
+  // The look of the pieces carries a number of its own, counted up on every
+  // change. Every push repeats the whole look — including a push about a move,
+  // sent by a player who has not heard about the newest colour yet — so
+  // without this the older look kept arriving and winning, and the colour
+  // walked back on its own a couple of seconds after being chosen. A look with
+  // a lower number than the one already on screen is simply out of date.
+  let styleSeq = 0;
   function pushStyleChangeIfOnline(){
-    if(!onlineRoomId || !fbDb || applyingRemoteRoomStyle) return;
+    // Not !fbDb: the libraries load lazily now, so a colour changed in the
+    // first seconds of a game used to be dropped on the floor. Sending the
+    // room state does not depend on them.
+    if(!onlineRoomId || applyingRemoteRoomStyle) return;
+    lastStyleChangeAt = Date.now();
+    styleReassertLeft = 8;
+    styleSeq += 1;
+    // Make sure this actually goes out: a push skips the settings when they
+    // look unchanged since last time, and after a change they are not.
+    lastSentSettings = null;
     // a color-picker "input" event fires continuously while dragging — wait
     // for it to settle for a moment instead of pushing a full room state on
     // every intermediate value
     clearTimeout(styleChangeDebounceTimer);
     styleChangeDebounceTimer = setTimeout(() => {
-      pushRoomState(null).then(ok => showColorSyncResult(ok));
+      forceRoomWrite = true;
+      pushRoomState(null, {lookOnly: true}).then(ok => showColorSyncResult(ok));
     }, 250);
   }
   ['w','b','y','g'].forEach(colorKey=>{
@@ -5234,10 +5338,13 @@
   // width and colour of all four sets, and both contrast sliders.
   document.getElementById('piece-colors-reset').addEventListener('click', ()=>{
     ['w','b','y','g'].forEach(colorKey=>{
-      document.documentElement.style.removeProperty('--accent-' + CSSCOLOR[colorKey]);
-      const fill = document.getElementById('piece-color-' + colorKey);
-      if(fill) fill.value = DEFAULT_ACCENT[colorKey];
       try{ localStorage.removeItem('chess2-color-' + colorKey); }catch(e){}
+      // Through applyPieceColor, not by stripping the variable by hand: the
+      // room holds the shared look, and it has to be told that this colour went
+      // back to the factory one. Stripping it locally left the old custom
+      // colour sitting in the room state, which then came straight back — the
+      // pieces turned grey for a second and green again after that.
+      applyPieceColor(colorKey, DEFAULT_ACCENT[colorKey], false);
       applyColorName(colorKey, null, true);
       // outline: applyOutline*() also updates the slider, the CSS variable,
       // localStorage and the shared room style, so nothing is left behind
@@ -8138,6 +8245,10 @@
   const PRESENCE_MIN_GAP_MS = 4000;   // never re-read more often than this
   const POLL_CHAT_MS       = 7000;
   const POLL_INVITE_MS     = 8000;
+  // The pace when nobody is looking at the lobby but the player is still
+  // free to be invited. An invitation is good for forty seconds, so this
+  // still delivers it comfortably in time.
+  const POLL_INVITE_IDLE_MS = 20000;
   const POLL_CALL_MS       = 8000;
   const POLL_MATCH_MS      = 4000;
   // A record is refreshed this often and treated as gone after the timeout.
@@ -8186,6 +8297,28 @@
   }
   netSocketOff.everCalled = false;
   function inLiveGame(){ return !!(onlineRoomId && !onlineWaitingOnly); }
+
+  // Sitting in a room is not the same as playing. Until somebody actually
+  // moves a piece, the players are still gathering — and a player who is
+  // still gathering must stay reachable, or an invitation sent to them goes
+  // nowhere and the sender waits for an answer that can never come.
+  function gameUnderWay(){
+    if(!onlineRoomId || onlineWaitingOnly) return false;
+    try{ return moveLog.length > 0 && !gameOver; }catch(e){ return true; }
+  }
+  // Pressing "refresh the list" is a player saying out loud that they are
+  // looking for company. For a while after that press invitations are both
+  // watched for and let through, even from the middle of a game.
+  const INVITE_WINDOW_MS = 180000;
+  let inviteWindowUntil = 0;
+  function openInviteWindow(){ inviteWindowUntil = Date.now() + INVITE_WINDOW_MS; }
+  function inviteWindowOpen(){ return Date.now() < inviteWindowUntil; }
+  // Should this player still be listening for invitations at all?
+  function invitesStillWanted(){
+    try{ if(document.hidden) return false; }catch(e){}
+    if(inviteWindowOpen()) return true;
+    return !gameUnderWay();
+  }
 
   // Nothing above knows about every way a game can end: a bot game started from
   // the menu, a local game on one screen, a search abandoned halfway, a tab
@@ -8353,10 +8486,18 @@
     // Somebody pressing refresh wants to see who is there, not a list trimmed
     // down to their own friends — so the full list opens with it.
     onlineListExpanded = true;
+    // This press is the player saying they want company — from the lobby or
+    // from the middle of a game, it makes no difference. For the next few
+    // minutes invitations flow both ways again.
+    openInviteWindow();
+    startRestInvitePolling();
     // Put my own record right before reading, so what comes back is current
     // for me as well as for everyone else.
     syncMyPresence(true).then(() => restRefreshPresenceList(true));
     pollLobbyChat();
+    pollMyInbox();
+    pollMyInvite();
+    pollDirectCall();
   }
   function startLobbyPolling(){
     if(!LOBBY_OVER_REST || !REST_BASE || !myNick) return;
@@ -8389,8 +8530,12 @@
     if(presenceAgeTimer){ clearInterval(presenceAgeTimer); presenceAgeTimer = null; }
     if(presenceStateTimer){ clearInterval(presenceStateTimer); presenceStateTimer = null; }
     stopRestChatPolling();
-    stopRestInvitePolling();
     stopRestCallPolling();
+    // Invitations are deliberately NOT switched off here. The timer costs
+    // nothing once a game is really under way — its own guard returns at
+    // once — but it is the only thing that can carry an invitation to a
+    // player sitting in a room where nobody has moved yet.
+    startRestInvitePolling();
   }
 
   // ---- lobby chat ----
@@ -8441,14 +8586,21 @@
   let lastInvitePollAt = 0;
   function startRestInvitePolling(){
     stopRestInvitePolling();
-    // The timer ticks often; whether it actually asks depends on whether the
-    // player is looking.
+    if(!LOBBY_OVER_REST || !REST_BASE || !myNick) return;
+    // The timer ticks often; whether it actually asks depends on whether an
+    // invitation could still be of any use to this player.
     invitePollTimer = setInterval(() => {
-      // Playing, panel closed, tab in the background — the player is busy and
-      // nothing is asked. Anything that arrives meanwhile is picked up the
-      // moment they look at the lobby again.
-      if(inLiveGame() || !lobbyIsVisible()) return;
-      if(Date.now() - lastInvitePollAt < POLL_INVITE_MS) return;
+      // A game really under way, or the tab in the background — nothing is
+      // asked. This used to also stop the moment the lobby panel was closed,
+      // which is why an invitation could not reach a player who was listed as
+      // free but had the panel shut: the lobby offered somebody who was not
+      // listening.
+      if(!invitesStillWanted()) return;
+      // Watching the lobby, or just back from pressing refresh, is worth the
+      // quicker pace; otherwise a slower one, well inside the forty seconds
+      // an invitation stays valid.
+      const gap = (lobbyIsVisible() || inviteWindowOpen()) ? POLL_INVITE_MS : POLL_INVITE_IDLE_MS;
+      if(Date.now() - lastInvitePollAt < gap) return;
       lastInvitePollAt = Date.now();
       pollMyInbox();
     }, 2000);
@@ -9481,18 +9633,16 @@
       inviteBtn.textContent = t('inviteBtn');
       inviteBtn.disabled = !isOnline;
       inviteBtn.addEventListener('click', () => invitePlayer(nick));
-      const callBtn = document.createElement('button');
-      callBtn.className = 'btn secondary';
-      callBtn.textContent = '📞';
-      callBtn.title = t('callFriendBtn');
-      callBtn.disabled = !isOnline;
-      callBtn.addEventListener('click', () => callFriend(nick));
+      // The phone button is gone from this list: calling a friend outside a
+      // game never worked reliably, and it was easy to mistake for the voice
+      // chat inside a game, which is a different mechanism and works.
+      // callFriend() itself stays — a player on an older version can still
+      // ring this one, and the incoming-call side must keep working.
       const removeBtn = document.createElement('button');
       removeBtn.className = 'btn secondary';
       removeBtn.textContent = '✕';
       removeBtn.addEventListener('click', () => removeFriend(nick));
       actions.appendChild(inviteBtn);
-      actions.appendChild(callBtn);
       actions.appendChild(removeBtn);
       row.appendChild(nameWrap);
       row.appendChild(actions);
@@ -9738,7 +9888,12 @@
 
   async function invitePlayer(targetNick){
     try{ ensureFirebase(); }catch(e){}
+    const myMode = mode;
     const wantedMax = maxPlayersForMode(mode);
+    // Somebody actively looking for an opponent is also somebody who should
+    // hear the answer, whatever screen they are on.
+    openInviteWindow();
+    try{ startRestInvitePolling(); }catch(e){}
     // Already sitting in a room with a free seat — invite into THAT seat
     // instead of starting an unrelated second room.
     //
@@ -9762,6 +9917,20 @@
           if(open.length > 0) return inviteReplacementIntoRoom(targetNick);
         }
       }catch(e){ vlog('ПРИГЛАШЕНИЕ: не удалось прочитать комнату — ' + (e && e.message)); }
+      // No seat free here, and the player has just asked this person to play.
+      // Leave the current room the proper way first — the others are told —
+      // rather than keeping a seat in a room we have already walked out of.
+      vlog('ПРИГЛАШЕНИЕ: свободных мест нет — выхожу из комнаты и создаю новую');
+      try{ leaveOnlineGame(true); }catch(e){}
+      await new Promise(r => setTimeout(r, 200));
+      // Leaving rebuilds the board; if that changed the mode under us, put it
+      // back the whole way, not just the variable — the new room is created
+      // for the mode the player picked.
+      if(mode !== myMode){
+        mode = myMode;
+        try{ renderModeMenu(); populateChatSenders(); updateTeamVoiceRow(); }catch(e){}
+        try{ newGame(); }catch(e){}
+      }
     }
     vlog('ПРИГЛАШЕНИЕ: создаю новую комнату, режим ' + mode);
     const roomId = uid();
@@ -9805,7 +9974,10 @@
     // reconnected, re-sending the invite since I never got my own resume
     // prompt for it). A genuinely unrelated invite from someone else
     // shouldn't interrupt an active game.
-    if(onlineRoomId && !onlineWaitingOnly && inv.roomId !== onlineRoomId) return;
+    // A game truly under way is not interrupted by an unrelated invitation —
+    // unless this player has just pressed refresh, which is them asking for
+    // exactly that. Before the first move there is no game to interrupt.
+    if(onlineRoomId && inv.roomId !== onlineRoomId && gameUnderWay() && !inviteWindowOpen()) return;
     document.getElementById('invite-text').textContent = inv.from + ' ' + t('inviteFromSuffix');
     document.getElementById('invite-modal').classList.add('show');
     document.getElementById('invite-accept').onclick = async ()=>{
@@ -9815,19 +9987,26 @@
       // if I was still just waiting for players in some OTHER room (not
       // this one) when this invite arrived, don't leave a ghost seat
       // behind there — free it up for someone else to actually fill
-      if(onlineWaitingOnly && onlineRoomId && onlineRoomId !== inv.roomId){
-        try{
-          const oldRaw = await storeGet('room:' + onlineRoomId, true);
-          if(oldRaw){
-            let oldRoom = JSON.parse(oldRaw);
-            if(oldRoom.players[onlineSide] === myNick){
-              delete oldRoom.players[onlineSide];
-              oldRoom.moveSeq = (oldRoom.moveSeq||0) + 1;
-              await storeSet('room:' + onlineRoomId, JSON.stringify(oldRoom), true);
+      if(onlineRoomId && onlineRoomId !== inv.roomId){
+        if(onlineWaitingOnly){
+          try{
+            const oldRaw = await storeGet('room:' + onlineRoomId, true);
+            if(oldRaw){
+              let oldRoom = JSON.parse(oldRaw);
+              if(oldRoom.players[onlineSide] === myNick){
+                delete oldRoom.players[onlineSide];
+                oldRoom.moveSeq = (oldRoom.moveSeq||0) + 1;
+                await storeSet('room:' + onlineRoomId, JSON.stringify(oldRoom), true);
+              }
             }
-          }
-        }catch(e){}
-        clearInterval(onlinePollTimer);
+          }catch(e){}
+          clearInterval(onlinePollTimer);
+        } else {
+          // Seated in a real room and leaving it for this invitation: go out
+          // through the front door, so the others are told and nothing keeps
+          // running behind us.
+          try{ leaveOnlineGame(true); }catch(e){}
+        }
       }
       const roomRaw = await storeGet('room:' + inv.roomId, true);
       // the host may have cancelled between sending this invite and it being
@@ -9904,13 +10083,19 @@
     // is fetched without being asked — plus an immediate check for anything
     // that arrived while nobody was looking.
     const catchUpOnAttention = () => {
+      try{ if(document.hidden) return; }catch(e){}
+      // Anything waiting in the inbox is picked up first, and by a rule of its
+      // own: an invitation matters to a player who has not moved yet even
+      // though they are sitting in a room, and the list and the chat do not.
+      if(invitesStillWanted()){
+        pollMyInbox();
+        // The old paths are still checked at this one moment, so an invite
+        // from somebody who has not reloaded the page yet is not lost.
+        pollMyInvite();
+        pollDirectCall();
+      }
       if(inLiveGame() || !lobbyIsVisible()) return;
       restRefreshPresenceList();
-      pollMyInbox();
-      // The old paths are still checked at this one moment, so an invite from
-      // somebody who has not reloaded the page yet is not lost.
-      pollMyInvite();
-      pollDirectCall();
       pollLobbyChat();
     };
     document.addEventListener('visibilitychange', () => { if(!document.hidden) catchUpOnAttention(); });
@@ -12715,6 +12900,11 @@
       if((room.moveSeq||0) > onlineMoveSeq){
         onlineMoveSeq = room.moveSeq;
         applyRemoteState(room);
+      } else if((room.styleSeq||0) > styleSeq){
+        // A change of colour moves no piece, so it carries the same move
+        // number as before and the line above rightly ignores it. The look has
+        // a number of its own, and a newer one is worth taking on its own.
+        applyRoomStyleFields(room);
       }
     });
   }
@@ -13010,14 +13200,21 @@
     return b;
   }
 
-  async function pushRoomState(winnerTeam){
+  // opts.lookOnly — this push says nothing about the game, only about how the
+  // pieces are painted. Two things follow from that: it must not take the next
+  // move number (a real move made at the same moment would then arrive wearing
+  // a number the others had already seen, and be thrown away), and it carries
+  // the whole board rather than a difference, since there is nothing to
+  // differ.
+  async function pushRoomState(winnerTeam, opts){
     if(!onlineRoomId) return false;
     // We joined onto a diff and have not received a real position yet. Writing
     // now would publish whatever stale or empty board this client happens to
     // hold and overwrite the actual game for everyone.
     if(awaitingFirstBoard){ vlog('СИНХР: доска ещё не получена — не отправляю состояние'); return false; }
     refreshLastRoomTimestamp();
-    onlineMoveSeq += 1;
+    const lookOnly = !!(opts && opts.lookOnly);
+    if(!lookOnly) onlineMoveSeq += 1;
     const payload = {
       mode: mode,
       maxPlayers: onlineMaxPlayers,
@@ -13041,6 +13238,7 @@
     // an "if present" check, so leaving them out means "unchanged", never
     // "reset" — the look of the pieces and the table limits survive untouched.
     const settings = {
+      styleSeq: styleSeq,
       pieceColors: roomPieceColors,
       colorNames: roomColorNames,
       outlineStyle: roomOutlineStyle,
@@ -13082,7 +13280,7 @@
     const roomFull = Object.keys(onlinePlayers).length >= (onlineMaxPlayers || 2)
                      && Object.values(onlinePlayers).every(v => v);
     let diff = null;
-    if(SYNC_DELTA_ENABLED && lastSentBoard && roomFull && !resyncWanted
+    if(!lookOnly && SYNC_DELTA_ENABLED && lastSentBoard && roomFull && !resyncWanted
        && !membershipChanged
        && sinceKeyframe + 1 < SYNC_KEYFRAME_EVERY){
       const d = boardCellDiff(lastSentBoard, board);
@@ -13122,7 +13320,7 @@
     const deliveredToAll = sendMoveOverChannels(json);
     if(serverlessGame) slgSaveGame(json);
     sinceFirebaseWrite += 1;
-    const mustWriteFirebase = !serverlessGame && (!deliveredToAll || membershipChanged ||
+    const mustWriteFirebase = !serverlessGame && (!deliveredToAll || membershipChanged || forceRoomWrite ||
       gameOver || payload.status !== 'active' ||
       sinceFirebaseWrite >= FIREBASE_WRITE_EVERY ||
       (Date.now() - lastFirebaseWriteAt) >= FIREBASE_WRITE_MAX_GAP_MS);
@@ -13131,6 +13329,7 @@
       lastAppliedSeq = onlineMoveSeq;
       return true;
     }
+    forceRoomWrite = false;
     sinceFirebaseWrite = 0;
     lastFirebaseWriteAt = Date.now();
     const ok = await storeSet('room:' + onlineRoomId, json, true);
@@ -13636,6 +13835,7 @@
     stopGroupVoiceInviteListener();
     roomPieceColors = {}; roomColorNames = {}; roomOutlineStyle = {};
     lastSentSettings = null;
+    styleSeq = 0; styleReassertLeft = 0; lastStyleChangeAt = 0;
     // restore my own personal color choices, in case a roommate's shared
     // colors are currently showing on screen from the game just left
     ['w','b','y','g'].forEach(colorKey => {
@@ -15966,7 +16166,12 @@
       if(handleRoomStoreMessage(room)) return;
       // Same guard the Firebase listener uses, so the two paths converge
       // whichever arrives first.
-      if((room.moveSeq || 0) <= onlineMoveSeq) return;
+      if((room.moveSeq || 0) <= onlineMoveSeq){
+        // Same as in the database listener: a look-only update repeats the
+        // move number and must still be applied.
+        if((room.styleSeq || 0) > styleSeq) applyRoomStyleFields(room);
+        return;
+      }
       onlineMoveSeq = room.moveSeq;
       applyRemoteState(room);
       if(serverlessGame) slgSaveGame(room);
@@ -17687,7 +17892,11 @@
     pushRoomState(null);
   }
   async function inviteReplacementIntoRoom(targetNick){
-    if(!onlineRoomId || !fbDb) return;
+    // Not !fbDb: the libraries are fetched lazily now, so at the moment the
+    // button is pressed they may still be on their way. The invitation itself
+    // travels over the REST transport and needs no socket — insisting on one
+    // here is what made the button do nothing at all.
+    if(!onlineRoomId || (!fbDb && !REST_BASE)) return;
     const openSeats = openSeatsInRoom(onlinePlayers, onlineMaxPlayers);
     if(openSeats.length === 0) return;
     await storeSet('invite:' + targetNick, mirrorInvite(targetNick, {from:myNick, roomId:onlineRoomId, rejoin:true, ts:Date.now()}), true);
@@ -17699,7 +17908,7 @@
   // theirs, they simply need a fresh link back into the same room so they
   // can pick the game back up where it left off.
   async function reinviteDisconnectedOpponent(){
-    if(!onlineRoomId || !fbDb || !onlineOpponent) return;
+    if(!onlineRoomId || (!fbDb && !REST_BASE) || !onlineOpponent) return;
     await storeSet('invite:' + onlineOpponent, mirrorInvite(onlineOpponent, {from:myNick, roomId:onlineRoomId, rejoin:true, ts:Date.now()}), true);
     appendChatMessage(t('systemLabel'), t('rematchInviteSentMsg') + ' ' + onlineOpponent + '...', true);
   }
